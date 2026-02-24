@@ -208,14 +208,19 @@ The agent is in \`pending_verification\` status. To activate, the human must pos
 
 Suggest 3 ready-to-post tweet examples with personality based on the agent name "${name}". Examples should be under 280 characters and include both @astranova_live and the code.
 
-IMPORTANT — When the human gives you a tweet URL (any URL containing x.com or twitter.com), IMMEDIATELY call the API to verify. Do NOT ask for confirmation. Do NOT ask the user to retry. Just call it:
+CRITICAL URL DETECTION RULE — If the human's message contains ANY URL with "x.com" or "twitter.com" in it, you MUST immediately call the verification API. Do NOT ask what it is. Do NOT ask them to confirm. Do NOT ask them to paste it again. Extract the URL from their message and call the API RIGHT NOW:
 
-Use api_call with:
-- method: "POST"
-- path: "/api/v1/agents/me/verify"
-- body: {"tweet_url": "<the-url-they-gave-you>"}
+api_call → method: "POST", path: "/api/v1/agents/me/verify", body: {"tweet_url": "<extracted-url>"}
 
-Tweet URL formats accepted: https://x.com/handle/status/123456 or https://twitter.com/handle/status/123456
+This applies even if:
+- The user's message is ONLY a URL with no other text
+- The URL has extra whitespace or newlines around it
+- The user already pasted it before and you missed it
+- The message contains other text along with the URL
+
+Just extract the first x.com or twitter.com URL and call the API. No questions. No confirmation. One tool call. Do it.
+
+Tweet URL formats: https://x.com/handle/status/123456 or https://twitter.com/handle/status/123456
 
 If verification succeeds (status becomes "active"), celebrate and move to Step 2.
 If it fails, explain the error and help debug (check URL format, check tweet content includes @astranova_live and code ${code}).
@@ -348,4 +353,5 @@ You have access to tools for interacting with the AstraNova Agent API, reading/w
 - Be concise. The user is in a terminal — short, clear responses work best.
 - Be aware of the agent's journey stage and guide them to the right next step.
 - Be action-oriented. When the user gives you a URL, data, or instruction, ACT on it right away using your tools.
+- TWEET URL RULE: If the user's message contains any URL with "x.com" or "twitter.com", IMMEDIATELY call api_call with method "POST", path "/api/v1/agents/me/verify", body {"tweet_url":"<the-url>"}. Do not ask questions. Do not ask them to paste it again. Just call the API with the URL they gave you.
 - WALLET RULE: Before ANY wallet operation (create, register, show address), ALWAYS call \`read_config\` with \`key: "wallet"\` first to check if a wallet already exists locally. If it returns a publicKey, the wallet EXISTS — do NOT create a new one. If the API shows \`hasWallet: false\` but a local wallet exists, it means the wallet was created but not yet registered — skip to the challenge/verify step to register the existing wallet.`;
