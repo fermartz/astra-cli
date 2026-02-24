@@ -1,0 +1,220 @@
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { Box, Text } from "ink";
+import { apiCall } from "../utils/http.js";
+import type { JourneyStage } from "../agent/system-prompt.js";
+
+interface StatusBarProps {
+  agentName: string;
+  journeyStage: JourneyStage;
+}
+
+interface MarketState {
+  price: number;
+  mood: string;
+}
+
+interface Portfolio {
+  cash: number;
+  tokens: number;
+  pnl: number;
+  pnlPct: number;
+}
+
+interface BarData {
+  market: MarketState | null;
+  portfolio: Portfolio | null;
+}
+
+const POLL_INTERVAL_MS = 30_000; // 30 seconds
+
+const StatusBar = React.memo(function StatusBar({
+  agentName,
+  journeyStage,
+}: StatusBarProps): React.JSX.Element {
+  // Single state object to batch market + portfolio updates into one render
+  const [data, setData] = useState<BarData>({ market: null, portfolio: null });
+  const mounted = useRef(true);
+
+  const canFetchData = journeyStage !== "fresh" && journeyStage !== "pending";
+
+  const poll = useCallback(async () => {
+    const [marketRes, portfolioRes] = await Promise.all([
+      fetchMarket(agentName),
+      fetchPortfolio(agentName),
+    ]);
+    if (!mounted.current) return;
+    setData((prev) => ({
+      market: marketRes ?? prev.market,
+      portfolio: portfolioRes ?? prev.portfolio,
+    }));
+  }, [agentName]);
+
+  useEffect(() => {
+    mounted.current = true;
+
+    if (!canFetchData) return;
+
+    void poll();
+    const interval = setInterval(() => void poll(), POLL_INTERVAL_MS);
+
+    return () => {
+      mounted.current = false;
+      clearInterval(interval);
+    };
+  }, [canFetchData, poll]);
+
+  const { market, portfolio } = data;
+
+  return (
+    <Box
+      width="100%"
+      borderStyle="single"
+      borderColor="green"
+      paddingX={1}
+    >
+      <Text bold color="green">
+        AstraNova
+      </Text>
+      <Text dimColor> │ </Text>
+      <Text color="white">{agentName}</Text>
+
+      {canFetchData && market && (
+        <>
+          <Text dimColor> │ </Text>
+          <Text color="yellow">$NOVA </Text>
+          <Text color="white">{formatPrice(market.price)}</Text>
+          <Text dimColor> │ </Text>
+          <Text color={moodColor(market.mood)}>{market.mood}</Text>
+        </>
+      )}
+
+      {canFetchData && portfolio && (
+        <>
+          <Text dimColor> │ </Text>
+          <Text color="cyan">{formatNum(portfolio.cash)} $SIM</Text>
+          {portfolio.tokens > 0 && (
+            <>
+              <Text dimColor> │ </Text>
+              <Text color="magenta">{formatNum(portfolio.tokens)} $NOVA</Text>
+            </>
+          )}
+          {portfolio.pnl !== 0 && (
+            <>
+              <Text dimColor> │ </Text>
+              <Text color={portfolio.pnl >= 0 ? "green" : "red"}>
+                P&L {portfolio.pnl >= 0 ? "+" : ""}{formatNum(portfolio.pnl)} ({portfolio.pnlPct >= 0 ? "+" : ""}{portfolio.pnlPct.toFixed(1)}%)
+              </Text>
+            </>
+          )}
+        </>
+      )}
+
+      {!canFetchData && (
+        <>
+          <Text dimColor> │ </Text>
+          <Text dimColor>pending verification</Text>
+        </>
+      )}
+
+      {canFetchData && !market && !portfolio && (
+        <>
+          <Text dimColor> │ </Text>
+          <Text dimColor>loading...</Text>
+        </>
+      )}
+    </Box>
+  );
+});
+
+export default StatusBar;
+
+// ─── Formatting ────────────────────────────────────────────────────────
+
+function formatPrice(price: number): string {
+  if (price >= 1) return price.toFixed(2);
+  if (price >= 0.01) return price.toFixed(4);
+  return price.toFixed(6);
+}
+
+function formatNum(n: number): string {
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+}
+
+function moodColor(mood: string): string {
+  switch (mood) {
+    case "euphoria":
+    case "bullish":
+      return "green";
+    case "fear":
+    case "bearish":
+      return "red";
+    case "crab":
+      return "yellow";
+    default:
+      return "white";
+  }
+}
+
+// ─── API Fetchers ──────────────────────────────────────────────────────
+
+interface MarketApiResponse {
+  market?: {
+    price?: number;
+    mood?: string;
+    [key: string]: unknown;
+  };
+  price?: number;
+  mood?: string;
+  [key: string]: unknown;
+}
+
+async function fetchMarket(agentName: string): Promise<MarketState | null> {
+  const result = await apiCall<MarketApiResponse>("GET", "/api/v1/market/state", undefined, agentName);
+  if (!result.ok) return null;
+
+  const d = result.data;
+  // Handle nested (d.market.price) or flat (d.price) response
+  const m = d.market ?? d;
+  return {
+    price: m.price ?? 0,
+    mood: m.mood ?? "",
+  };
+}
+
+interface PortfolioApiResponse {
+  portfolio?: {
+    cash?: number;
+    tokens?: number;
+    pnl?: number;
+    pnlPct?: number;
+    currentPrice?: number;
+    [key: string]: unknown;
+  };
+  cash?: number;
+  tokens?: number;
+  pnl?: number;
+  pnlPct?: number;
+  [key: string]: unknown;
+}
+
+async function fetchPortfolio(agentName: string): Promise<Portfolio | null> {
+  const result = await apiCall<PortfolioApiResponse>(
+    "GET",
+    "/api/v1/portfolio",
+    undefined,
+    agentName,
+  );
+  if (!result.ok) return null;
+
+  const d = result.data;
+  // Handle nested (d.portfolio.cash) or flat (d.cash) response
+  const p = d.portfolio ?? d;
+  return {
+    cash: p.cash ?? 0,
+    tokens: p.tokens ?? 0,
+    pnl: p.pnl ?? 0,
+    pnlPct: p.pnlPct ?? 0,
+  };
+}

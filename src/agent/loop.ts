@@ -1,0 +1,327 @@
+import { streamText, type CoreMessage } from "ai";
+import { zodToJsonSchema } from "zod-to-json-schema";
+import type { ZodType } from "zod";
+import { getModel, isCodexOAuth, getCodexAccessToken } from "./provider.js";
+import { buildSystemPrompt, type AgentProfile } from "./system-prompt.js";
+import { astraTools } from "../tools/index.js";
+import { callCodex, convertToolsForCodex, type CodexInputItem } from "./codex-provider.js";
+import { loadConfig } from "../config/store.js";
+import { writeAuditEntry } from "../utils/audit.js";
+
+/** Maximum time (ms) for a single agent turn before we abort. */
+const TURN_TIMEOUT_MS = 90_000; // 90 seconds
+
+export interface AgentLoopCallbacks {
+  /** Called with each text chunk as the LLM streams its response. */
+  onTextChunk: (chunk: string) => void;
+  /** Called when the LLM starts a tool call. */
+  onToolCallStart?: (toolName: string) => void;
+  /** Called when a tool call completes. */
+  onToolCallEnd?: (toolName: string) => void;
+}
+
+export interface AgentLoopResult {
+  /** The complete assistant text response. */
+  text: string;
+  /** Messages to append to conversation history (assistant + tool results). */
+  responseMessages: CoreMessage[];
+}
+
+/**
+ * Run one turn of the agent loop.
+ *
+ * Sends the conversation to the LLM via streamText() with tools enabled.
+ * For Codex OAuth, uses a custom SSE provider (the Vercel AI SDK can't
+ * parse the Codex backend's streaming format).
+ *
+ * Includes a 90-second timeout to prevent hanging.
+ */
+export async function runAgentTurn(
+  messages: CoreMessage[],
+  skillContext: string,
+  tradingContext: string,
+  walletContext: string,
+  rewardsContext: string,
+  onboardingContext: string,
+  apiContext: string,
+  profile: AgentProfile,
+  callbacks: AgentLoopCallbacks,
+  memoryContent?: string,
+): Promise<AgentLoopResult> {
+  const systemPrompt = buildSystemPrompt(skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, memoryContent);
+
+  // Route to the appropriate provider
+  if (isCodexOAuth()) {
+    return runCodexTurn(messages, systemPrompt, callbacks);
+  }
+  return runSdkTurn(messages, systemPrompt, callbacks);
+}
+
+// ─── Codex OAuth Turn (custom SSE) ──────────────────────────────────────
+
+async function runCodexTurn(
+  messages: CoreMessage[],
+  systemPrompt: string,
+  callbacks: AgentLoopCallbacks,
+): Promise<AgentLoopResult> {
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), TURN_TIMEOUT_MS);
+
+  try {
+    const accessToken = await getCodexAccessToken();
+    const config = loadConfig();
+    const model = config?.model ?? "gpt-5.3-codex";
+
+    // Convert CoreMessage[] to Codex input items
+    const codexInput: CodexInputItem[] = messages
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+      }));
+
+    // Convert tools to Codex format — extract JSON schema from Zod-based tools
+    const codexTools = convertToolsForCodex(
+      Object.fromEntries(
+        Object.entries(astraTools).map(([name, t]) => [
+          name,
+          {
+            description: (t as { description?: string }).description,
+            parameters: extractJsonSchema(t),
+          },
+        ]),
+      ),
+    );
+
+    // Accumulate text across all LLM responses (not just the last one)
+    let accumulatedText = "";
+
+    // First call
+    let result = await callCodex({
+      accessToken,
+      model,
+      instructions: systemPrompt,
+      input: codexInput,
+      tools: codexTools,
+      abortSignal: abortController.signal,
+      callbacks,
+    });
+    accumulatedText += result.text;
+
+    // Handle tool calls (up to 10 steps — wallet registration needs ~6)
+    let steps = 0;
+    process.stderr.write(`[astra] Codex response: text=${result.text.length}chars, toolCalls=${result.toolCalls.map(tc => tc.name).join(",") || "none"}\n`);
+    while (result.toolCalls.length > 0 && steps < 10) {
+      steps++;
+
+      // Execute each tool call and send results using proper Responses API format
+      for (const tc of result.toolCalls) {
+        const toolDef = astraTools[tc.name as keyof typeof astraTools];
+        if (!toolDef) {
+          // Echo the function_call back + error output
+          codexInput.push({
+            type: "function_call",
+            id: tc.id,
+            call_id: tc.callId,
+            name: tc.name,
+            arguments: tc.arguments,
+          });
+          codexInput.push({
+            type: "function_call_output",
+            call_id: tc.callId,
+            output: JSON.stringify({ error: `Tool "${tc.name}" not found.` }),
+          });
+          continue;
+        }
+
+        callbacks.onToolCallStart?.(tc.name);
+
+        const startTime = Date.now();
+        try {
+          const args = JSON.parse(tc.arguments) as Record<string, unknown>;
+          process.stderr.write(`[astra] Tool ${tc.name}(${tc.callId}) args: ${JSON.stringify(args)}\n`);
+          const execute = (toolDef as unknown as { execute: (args: Record<string, unknown>, options: Record<string, unknown>) => Promise<unknown> }).execute;
+          const toolResult = await execute(args, {});
+          process.stderr.write(`[astra] Tool ${tc.name}(${tc.callId}) result: ${JSON.stringify(toolResult).slice(0, 200)}\n`);
+
+          writeAuditEntry({
+            ts: new Date().toISOString(),
+            tool: tc.name,
+            args,
+            result: toolResult,
+            ok: !(toolResult as Record<string, unknown>)?.error,
+            durationMs: Date.now() - startTime,
+          });
+
+          callbacks.onToolCallEnd?.(tc.name);
+
+          // Echo the model's function_call back (id = item ID), then provide the output (call_id = call ID)
+          codexInput.push({
+            type: "function_call",
+            id: tc.id,
+            call_id: tc.callId,
+            name: tc.name,
+            arguments: tc.arguments,
+          });
+          codexInput.push({
+            type: "function_call_output",
+            call_id: tc.callId,
+            output: JSON.stringify(toolResult),
+          });
+        } catch (toolError: unknown) {
+          callbacks.onToolCallEnd?.(tc.name);
+
+          const errMsg = toolError instanceof Error ? toolError.message : "Tool execution failed";
+          process.stderr.write(`[astra] Tool ${tc.name}(${tc.callId}) error: ${errMsg}\n`);
+
+          writeAuditEntry({
+            ts: new Date().toISOString(),
+            tool: tc.name,
+            args: tc.arguments,
+            result: { error: errMsg },
+            ok: false,
+            durationMs: Date.now() - startTime,
+          });
+
+          codexInput.push({
+            type: "function_call",
+            id: tc.id,
+            call_id: tc.callId,
+            name: tc.name,
+            arguments: tc.arguments,
+          });
+          codexInput.push({
+            type: "function_call_output",
+            call_id: tc.callId,
+            output: JSON.stringify({ error: errMsg }),
+          });
+        }
+      }
+
+      // Call again with tool results in proper format
+      result = await callCodex({
+        accessToken,
+        model,
+        instructions: systemPrompt,
+        input: codexInput,
+        tools: codexTools,
+        abortSignal: abortController.signal,
+        callbacks,
+      });
+      accumulatedText += result.text;
+      process.stderr.write(`[astra] Codex step ${steps}: text=${result.text.length}chars, toolCalls=${result.toolCalls.map(tc => tc.name).join(",") || "none"}\n`);
+    }
+
+    process.stderr.write(`[astra] Codex loop done after ${steps} steps, totalText=${accumulatedText.length}chars\n`);
+    const text = accumulatedText || "(No text response)";
+
+    // Build response messages for conversation history
+    const responseMessages: CoreMessage[] = [
+      { role: "assistant", content: text },
+    ];
+
+    return { text, responseMessages };
+  } catch (error: unknown) {
+    clearTimeout(timeout);
+
+    if (abortController.signal.aborted) {
+      throw new Error("Response timed out after 90 seconds. Please try again.");
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[astra] Codex error: ${message}\n`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ─── SDK Turn (Claude, OpenAI API key, Gemini) ────────────────────────
+
+async function runSdkTurn(
+  messages: CoreMessage[],
+  systemPrompt: string,
+  callbacks: AgentLoopCallbacks,
+): Promise<AgentLoopResult> {
+  const model = await getModel();
+
+  const abortController = new AbortController();
+  const timeout = setTimeout(() => abortController.abort(), TURN_TIMEOUT_MS);
+
+  try {
+    const result = streamText({
+      model,
+      system: systemPrompt,
+      messages,
+      tools: astraTools,
+      maxSteps: 10,
+      temperature: 0.7,
+      abortSignal: abortController.signal,
+      onStepFinish: ({ toolCalls, toolResults }) => {
+        if (toolCalls && toolCalls.length > 0) {
+          for (let i = 0; i < toolCalls.length; i++) {
+            const tc = toolCalls[i];
+            const tr = toolResults?.[i];
+            callbacks.onToolCallEnd?.(tc.toolName);
+            writeAuditEntry({
+              ts: new Date().toISOString(),
+              tool: tc.toolName,
+              args: tc.args,
+              result: tr?.result,
+              ok: !(tr?.result as Record<string, unknown>)?.error,
+              durationMs: 0, // not available from SDK callback
+            });
+          }
+        }
+      },
+    });
+
+    for await (const chunk of result.textStream) {
+      callbacks.onTextChunk(chunk);
+    }
+
+    const response = await result.response;
+    const text = await result.text;
+
+    return {
+      text: text || "(No response from LLM)",
+      responseMessages: response.messages as CoreMessage[],
+    };
+  } catch (error: unknown) {
+    clearTimeout(timeout);
+
+    if (abortController.signal.aborted) {
+      throw new Error("Response timed out after 90 seconds. Please try again.");
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[astra] Agent loop error: ${message}\n`);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Extract JSON schema from a Vercel AI SDK tool definition.
+ * Tools defined with tool({ parameters: z.object({...}) }) store a Zod schema
+ * in the parameters property. We convert it to JSON Schema for the Codex API.
+ */
+function extractJsonSchema(toolDef: unknown): Record<string, unknown> {
+  const t = toolDef as { parameters?: unknown };
+  if (!t.parameters) return {};
+
+  // Check if it's a Zod schema (has _def property)
+  const params = t.parameters as { _def?: unknown };
+  if (params._def) {
+    try {
+      return zodToJsonSchema(params as ZodType) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
