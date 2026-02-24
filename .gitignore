@@ -21,7 +21,14 @@ Thumbs.db
 # Test coverage
 coverage/
 
+# Logs
+*.log
+
+# TypeScript
+*.tsbuildinfo
+
 # pnpm
 .pnpm-debug.log
 
+# Local docs
 docs/
