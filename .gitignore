@@ -32,3 +32,6 @@ coverage/
 
 # Local docs
 docs/
+
+# Claude Code
+.claude/
