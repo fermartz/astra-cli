@@ -23,7 +23,6 @@ export const ConfigSchema = z.object({
       })
       .optional(),
   }),
-  codexMode: z.enum(["handoff", "native"]).default("handoff"),
   apiBase: z.string().default("https://agents.astranova.live"),
   preferences: z
     .object({

@@ -51,7 +51,6 @@ describe("Config Store", () => {
         provider: "claude",
         model: "claude-sonnet-4-20250514",
         auth: { type: "api-key", apiKey: "sk-test-123" },
-        codexMode: "handoff",
         apiBase: "https://agents.astranova.live",
         preferences: { theme: "dark" },
       };
@@ -63,11 +62,6 @@ describe("Config Store", () => {
       expect(loaded!.auth.apiKey).toBe("sk-test-123");
     });
 
-    it("applies default for codexMode when missing", () => {
-      setupTestConfig(); // doesn't include codexMode
-      const loaded = loadConfig();
-      expect(loaded!.codexMode).toBe("handoff");
-    });
   });
 
   // ─── State ───────────────────────────────────────────────────────────

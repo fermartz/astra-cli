@@ -23,7 +23,6 @@ import { getSkillContext, fetchRemoteContext } from "../remote/skill.js";
 import type { AgentProfile } from "../agent/system-prompt.js";
 import { loadLatestSession, pruneOldSessions, newSessionId } from "../config/sessions.js";
 import { loadMemory } from "../tools/memory.js";
-import { checkCodexInstalled, handoffToCodex } from "../drivers/codex-handoff.js";
 import App from "../ui/App.js";
 
 /**
@@ -104,21 +103,6 @@ async function main(): Promise<void> {
   let apiStatus: AgentStatus | null = null;
   if (isReturning) {
     apiStatus = await showWelcomeBack(agentName);
-  }
-
-  // Codex handoff mode: spawn Codex CLI directly, skip Ink TUI entirely
-  if (config.provider === "openai-oauth" && (config.codexMode ?? "handoff") === "handoff") {
-    if (!checkCodexInstalled()) {
-      console.error(
-        "\n  Codex CLI not found. Install it with:\n\n" +
-        "    npm i -g codex\n\n" +
-        '  Or set "codexMode": "native" in ~/.config/astranova/config.json to use the built-in provider.\n',
-      );
-      process.exit(1);
-    }
-
-    const exitCode = await handoffToCodex(agentName);
-    process.exit(exitCode);
   }
 
   // Step 4: Fetch remote context (cached, graceful fallback)

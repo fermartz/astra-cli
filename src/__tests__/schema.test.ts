@@ -19,27 +19,7 @@ describe("ConfigSchema", () => {
     });
     expect(config.provider).toBe("claude");
     expect(config.version).toBe(1); // default
-    expect(config.codexMode).toBe("handoff"); // default
     expect(config.apiBase).toBe("https://agents.astranova.live"); // default
-  });
-
-  it("accepts codexMode: native", () => {
-    const config = ConfigSchema.parse({
-      provider: "openai-oauth",
-      model: "gpt-5.3-codex",
-      auth: { type: "oauth", oauth: { accessToken: "tok", refreshToken: "ref", expiresAt: 999 } },
-      codexMode: "native",
-    });
-    expect(config.codexMode).toBe("native");
-  });
-
-  it("defaults codexMode to handoff", () => {
-    const config = ConfigSchema.parse({
-      provider: "openai-oauth",
-      model: "gpt-5.3-codex",
-      auth: { type: "oauth", oauth: { accessToken: "tok", refreshToken: "ref", expiresAt: 999 } },
-    });
-    expect(config.codexMode).toBe("handoff");
   });
 
   it("rejects invalid provider", () => {
@@ -52,16 +32,6 @@ describe("ConfigSchema", () => {
     ).toThrow();
   });
 
-  it("rejects invalid codexMode", () => {
-    expect(() =>
-      ConfigSchema.parse({
-        provider: "claude",
-        model: "test",
-        auth: { type: "api-key" },
-        codexMode: "invalid",
-      }),
-    ).toThrow();
-  });
 });
 
 describe("CredentialsSchema", () => {
