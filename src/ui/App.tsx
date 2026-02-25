@@ -23,6 +23,7 @@ interface AppProps {
   memoryContent?: string;
   initialCoreMessages?: CoreMessage[];
   initialChatMessages?: Array<{ role: string; content: string }>;
+  debug?: boolean;
 }
 
 export default function App({
@@ -38,6 +39,7 @@ export default function App({
   memoryContent,
   initialCoreMessages,
   initialChatMessages,
+  debug,
 }: AppProps): React.JSX.Element {
   const { exit } = useApp();
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(
@@ -232,11 +234,13 @@ export default function App({
       } catch (error: unknown) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
+        const stack = error instanceof Error ? error.stack : undefined;
         // Log to stderr for debugging (visible after Ink exits)
         process.stderr.write(`[astra] Error: ${message}\n`);
+        const debugInfo = debug && stack ? `\n\n\`\`\`\n${stack}\n\`\`\`` : "";
         setChatMessages((prev) => [
           ...prev,
-          { role: "assistant", content: `Error: ${message}` },
+          { role: "assistant", content: `Error: ${message}${debugInfo}` },
         ]);
         setCoreMessages(newCoreMessages);
         setStreamingText(undefined);

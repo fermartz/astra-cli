@@ -66,6 +66,12 @@ async function main(): Promise<void> {
   // Parse CLI args
   const args = process.argv.slice(2);
   const shouldContinue = args.includes("--continue") || args.includes("-c");
+  const debug = args.includes("--debug") || args.includes("-d");
+
+  // Activate debug logging in agent loop when --debug flag is set
+  if (debug) {
+    process.env.ASTRA_DEBUG = "1";
+  }
 
   // Step 1: Onboarding or welcome back
   const isReturning = isConfigured();
@@ -197,6 +203,7 @@ async function main(): Promise<void> {
       memoryContent,
       initialCoreMessages,
       initialChatMessages,
+      debug,
     }),
   );
 

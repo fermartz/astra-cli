@@ -1,4 +1,5 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModelV1 } from "ai";
 import { loadConfig, saveConfig } from "../config/store.js";
 import type { Config } from "../config/schema.js";
@@ -7,10 +8,40 @@ import { isTokenExpired, refreshTokens } from "../onboarding/oauth.js";
 /**
  * Check if the current provider is Codex OAuth.
  * Used by the agent loop to route to the custom Codex SSE provider.
+ * Returns false if ASTRA_PROVIDER env override is set to a non-oauth provider.
  */
 export function isCodexOAuth(): boolean {
+  const override = process.env.ASTRA_PROVIDER;
+  if (override) return override === "openai-oauth";
   const config = loadConfig();
   return config?.provider === "openai-oauth";
+}
+
+/**
+ * Check if the current provider is OpenAI with API key (Responses API path).
+ * Used by the agent loop to route to the Responses API instead of Vercel AI SDK.
+ */
+export function isOpenAIResponses(): boolean {
+  const override = process.env.ASTRA_PROVIDER;
+  if (override) return override === "openai";
+  const config = loadConfig();
+  return config?.provider === "openai";
+}
+
+/**
+ * Get the OpenAI API key for the Responses API path.
+ * Checks env var override first, then config.
+ */
+export function getOpenAIApiKey(): string {
+  const envKey = process.env.ASTRA_API_KEY;
+  if (envKey) return envKey;
+  const config = loadConfig();
+  if (config?.auth?.type === "api-key" && config.auth.apiKey) {
+    return config.auth.apiKey;
+  }
+  throw new Error(
+    "OpenAI API key not found. Set ASTRA_API_KEY or re-run onboarding.",
+  );
 }
 
 /**
@@ -42,6 +73,25 @@ export async function getModel(): Promise<LanguageModelV1> {
     throw new Error(
       "No config found. Run the onboarding wizard first (delete ~/.config/astranova/config.json to re-run).",
     );
+  }
+
+  // Allow env override for testing providers without changing config
+  const providerOverride = process.env.ASTRA_PROVIDER;
+  const apiKeyOverride = process.env.ASTRA_API_KEY;
+  const modelOverride = process.env.ASTRA_MODEL;
+
+  if (providerOverride) {
+    if (!apiKeyOverride) {
+      throw new Error(
+        `ASTRA_PROVIDER=${providerOverride} is set but ASTRA_API_KEY is missing.\nExport your API key: export ASTRA_API_KEY=sk-...`,
+      );
+    }
+    return createModelFromConfig({
+      ...config,
+      provider: providerOverride as Config["provider"],
+      model: modelOverride ?? config.model,
+      auth: { type: "api-key", apiKey: apiKeyOverride },
+    });
   }
 
   return createModelFromConfig(config);
@@ -91,10 +141,13 @@ function createModelFromConfig(config: Config): LanguageModelV1 {
       return anthropic(model);
     }
 
-    case "openai":
-      throw new Error(
-        "OpenAI API support is coming soon. Please use Claude or ChatGPT/Codex.\nTo switch, delete ~/.config/astranova/config.json and re-run astra.",
-      );
+    case "openai": {
+      if (auth.type !== "api-key" || !auth.apiKey) {
+        throw new Error("OpenAI requires an API key. Re-run onboarding to set one up.");
+      }
+      const openai = createOpenAI({ apiKey: auth.apiKey });
+      return openai(model);
+    }
 
     case "google":
       throw new Error(

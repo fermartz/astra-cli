@@ -1,22 +1,26 @@
 {
-  "name": "@astra/cli",
-  "version": "0.1.0",
+  "name": "@astranova-live/cli",
+  "version": "0.1.3",
   "description": "Terminal agent for the AstraNova living market universe",
   "type": "module",
   "bin": {
-    "astra": "./dist/astra.js"
+    "astra": "./bin/astra.js"
   },
   "engines": {
     "node": ">=18.0.0"
   },
   "main": "./dist/astra.js",
   "files": [
-    "dist",
+    "dist/astra.js",
+    "bin/astra.js",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "start": "node dist/astra.js",
+    "start:debug": "node dist/astra.js --debug 2>debug.log",
+    "start:gpt": "ASTRA_PROVIDER=openai ASTRA_MODEL=gpt-4o-mini node dist/astra.js",
+    "start:gpt:debug": "ASTRA_PROVIDER=openai ASTRA_MODEL=gpt-4o-mini node dist/astra.js --debug 2>debug.log",
     "dev": "tsup --watch",
     "build": "tsup",
     "lint": "eslint src/",

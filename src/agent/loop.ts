@@ -1,7 +1,7 @@
 import { streamText, generateText, type CoreMessage } from "ai";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ZodType } from "zod";
-import { getModel, isCodexOAuth, getCodexAccessToken } from "./provider.js";
+import { getModel, isCodexOAuth, isOpenAIResponses, getCodexAccessToken, getOpenAIApiKey } from "./provider.js";
 import { buildSystemPrompt, type AgentProfile } from "./system-prompt.js";
 import { astraTools } from "../tools/index.js";
 import { callCodex, callCodexWithRetry, convertToolsForCodex, type CodexInputItem } from "./codex-provider.js";
@@ -17,7 +17,7 @@ import {
 } from "./compaction.js";
 
 /** Maximum time (ms) for a single agent turn before we abort (SDK path only). */
-const TURN_TIMEOUT_MS = 90_000; // 90 seconds
+const TURN_TIMEOUT_MS = Number(process.env.ASTRA_TIMEOUT) || 180_000; // 3 minutes (configurable via ASTRA_TIMEOUT)
 
 /** Debug logging — only outputs when ASTRA_DEBUG env var is set. */
 const DEBUG = !!process.env.ASTRA_DEBUG;
@@ -90,7 +90,9 @@ export async function runAgentTurn(
   const runTurn = () =>
     isCodexOAuth()
       ? runCodexTurn(messages, systemPrompt, callbacks, config)
-      : runSdkTurn(messages, systemPrompt, callbacks);
+      : isOpenAIResponses()
+        ? runOpenAIResponsesTurn(messages, systemPrompt, callbacks, config)
+        : runSdkTurn(messages, systemPrompt, callbacks);
 
   let result: AgentLoopResult;
   try {
@@ -122,7 +124,9 @@ export async function runAgentTurn(
     try {
       const retry = isCodexOAuth()
         ? await runCodexTurn(messages, systemPrompt, callbacks, config)
-        : await runSdkTurn(messages, systemPrompt, callbacks);
+        : isOpenAIResponses()
+          ? await runOpenAIResponsesTurn(messages, systemPrompt, callbacks, config)
+          : await runSdkTurn(messages, systemPrompt, callbacks);
 
       if (!isEmptyResponse(retry)) {
         result = retry;
@@ -141,22 +145,68 @@ export async function runAgentTurn(
   return result;
 }
 
-// ─── Codex OAuth Turn (custom SSE) ──────────────────────────────────────
+// ─── Responses API Turns (Codex OAuth + OpenAI API key) ─────────────────
 
+const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+
+/** Configuration for a Responses API turn (shared by Codex and OpenAI paths). */
+interface ResponsesTurnConfig {
+  model: string;
+  baseUrl?: string;
+  getAccessToken: () => Promise<string>;
+  onTokenExpired?: () => Promise<string>;
+}
+
+/** Codex OAuth turn — delegates to shared Responses API turn with OAuth token refresh. */
 async function runCodexTurn(
   messages: CoreMessage[],
   systemPrompt: string,
   callbacks: AgentLoopCallbacks,
   config?: ReturnType<typeof loadConfig>,
 ): Promise<AgentLoopResult> {
-  // No outer timeout — each callCodexWithRetry manages its own per-call timeout + retry.
+  return runResponsesApiTurn(messages, systemPrompt, callbacks, {
+    model: config?.model ?? "gpt-5.3-codex",
+    getAccessToken: () => getCodexAccessToken(),
+    onTokenExpired: () => getCodexAccessToken(),
+  });
+}
 
-  const model = config?.model ?? "gpt-5.3-codex";
+/** OpenAI Responses API turn — same protocol, static API key, public endpoint. */
+async function runOpenAIResponsesTurn(
+  messages: CoreMessage[],
+  systemPrompt: string,
+  callbacks: AgentLoopCallbacks,
+  config?: ReturnType<typeof loadConfig>,
+): Promise<AgentLoopResult> {
+  const apiKey = getOpenAIApiKey();
+  return runResponsesApiTurn(messages, systemPrompt, callbacks, {
+    model: config?.model ?? "gpt-4o-mini",
+    baseUrl: OPENAI_RESPONSES_URL,
+    getAccessToken: async () => apiKey,
+    // No onTokenExpired — API keys don't expire
+  });
+}
+
+/**
+ * Shared Responses API turn — handles the tool execution loop.
+ *
+ * Used by both Codex OAuth (chatgpt.com backend) and OpenAI API key
+ * (api.openai.com/v1/responses). Same SSE format, same tool calling,
+ * same request body — only the base URL and auth differ.
+ */
+async function runResponsesApiTurn(
+  messages: CoreMessage[],
+  systemPrompt: string,
+  callbacks: AgentLoopCallbacks,
+  turnConfig: ResponsesTurnConfig,
+): Promise<AgentLoopResult> {
+  // No outer timeout — each callCodexWithRetry manages its own per-call timeout + retry.
+  const { model, baseUrl, getAccessToken, onTokenExpired } = turnConfig;
 
   // Convert CoreMessage[] to Codex input items — preserve tool call context
   const codexInput: CodexInputItem[] = convertToCodexInput(messages);
 
-  // Convert tools to Codex format — extract JSON schema from Zod-based tools
+  // Convert tools to Responses API format — extract JSON schema from Zod-based tools
   const codexTools = convertToolsForCodex(
     Object.fromEntries(
       Object.entries(astraTools).map(([name, t]) => [
@@ -172,8 +222,8 @@ async function runCodexTurn(
   // Track structured response messages for session persistence
   const responseMessages: CoreMessage[] = [];
 
-  // First call — get fresh token
-  let accessToken = await getCodexAccessToken();
+  // First call
+  let accessToken = await getAccessToken();
   let result = await callCodexWithRetry({
     accessToken,
     model,
@@ -181,7 +231,8 @@ async function runCodexTurn(
     input: codexInput,
     tools: codexTools,
     callbacks,
-    onTokenExpired: () => getCodexAccessToken(),
+    baseUrl,
+    onTokenExpired,
   });
 
   // Track only the latest response text (don't accumulate across steps — avoids duplication)
@@ -189,7 +240,7 @@ async function runCodexTurn(
 
   // Handle incomplete responses
   if (result.incomplete) {
-    debugLog(`Codex response incomplete: ${result.incompleteReason}`);
+    debugLog(`Response incomplete: ${result.incompleteReason}`);
     // Discard tool calls from incomplete responses (args may be truncated)
     if (result.toolCalls.length > 0) {
       debugLog(`Discarding ${result.toolCalls.length} tool calls from incomplete response`);
@@ -200,7 +251,7 @@ async function runCodexTurn(
 
   // Handle tool calls (up to 10 steps — wallet registration needs ~6)
   let steps = 0;
-  debugLog(`Codex response: text=${result.text.length}chars, toolCalls=${result.toolCalls.map(tc => tc.name).join(",") || "none"}`);
+  debugLog(`Response: text=${result.text.length}chars, toolCalls=${result.toolCalls.map(tc => tc.name).join(",") || "none"}`);
   while (result.toolCalls.length > 0 && steps < 10) {
     steps++;
 
@@ -329,8 +380,8 @@ async function runCodexTurn(
       responseMessages.push({ role: "tool", content: toolResultParts } as CoreMessage);
     }
 
-    // Call again with tool results — re-fetch token (no-op if still fresh)
-    accessToken = await getCodexAccessToken();
+    // Call again with tool results
+    accessToken = await getAccessToken();
     result = await callCodexWithRetry({
       accessToken,
       model,
@@ -338,7 +389,8 @@ async function runCodexTurn(
       input: codexInput,
       tools: codexTools,
       callbacks,
-      onTokenExpired: () => getCodexAccessToken(),
+      baseUrl,
+      onTokenExpired,
     });
 
     // Overwrite — only keep the latest step's text
@@ -346,7 +398,7 @@ async function runCodexTurn(
 
     // Handle incomplete responses mid-loop
     if (result.incomplete) {
-      debugLog(`Codex step ${steps} incomplete: ${result.incompleteReason}`);
+      debugLog(`Step ${steps} incomplete: ${result.incompleteReason}`);
       if (result.toolCalls.length > 0) {
         debugLog(`Discarding ${result.toolCalls.length} tool calls from incomplete response`);
         result = { ...result, toolCalls: [] };
@@ -354,18 +406,18 @@ async function runCodexTurn(
       finalText += "\n\n(Response was truncated — try a shorter message or start a new session.)";
     }
 
-    debugLog(`Codex step ${steps}: text=${result.text.length}chars, toolCalls=${result.toolCalls.map(tc => tc.name).join(",") || "none"}`);
+    debugLog(`Step ${steps}: text=${result.text.length}chars, toolCalls=${result.toolCalls.map(tc => tc.name).join(",") || "none"}`);
   }
 
-  debugLog(`Codex loop done after ${steps} steps, finalText=${finalText.length}chars`);
+  debugLog(`Responses loop done after ${steps} steps, finalText=${finalText.length}chars`);
   let text = finalText;
 
-  // Tools ran but Codex returned no summary text — retry the final call once.
+  // Tools ran but model returned no summary text — retry the final call once.
   // The tool results are already in codexInput, so the LLM just needs to summarize.
   if (!text && steps > 0) {
-    debugLog("Tools ran but no summary text — nudging Codex for a summary");
+    debugLog("Tools ran but no summary text — nudging model for a summary");
     codexInput.push({ role: "user", content: "Please summarize what just happened." });
-    accessToken = await getCodexAccessToken();
+    accessToken = await getAccessToken();
     const summaryRetry = await callCodexWithRetry({
       accessToken,
       model,
@@ -373,7 +425,8 @@ async function runCodexTurn(
       input: codexInput,
       tools: codexTools,
       callbacks,
-      onTokenExpired: () => getCodexAccessToken(),
+      baseUrl,
+      onTokenExpired,
     });
     text = summaryRetry.text;
   }
@@ -397,10 +450,15 @@ async function runSdkTurn(
   systemPrompt: string,
   callbacks: AgentLoopCallbacks,
 ): Promise<AgentLoopResult> {
+  debugLog(`SDK turn starting — getting model...`);
   const model = await getModel();
+  debugLog(`Model ready: ${model.modelId ?? "unknown"} — calling streamText...`);
 
   const abortController = new AbortController();
-  const timeout = setTimeout(() => abortController.abort(), TURN_TIMEOUT_MS);
+  const timeout = setTimeout(() => {
+    debugLog("SDK turn timeout — aborting after 90s");
+    abortController.abort();
+  }, TURN_TIMEOUT_MS);
 
   try {
     const result = streamText({
@@ -430,12 +488,15 @@ async function runSdkTurn(
       },
     });
 
+    debugLog("streamText created — consuming textStream...");
     for await (const chunk of result.textStream) {
       callbacks.onTextChunk(chunk);
     }
+    debugLog("textStream consumed — awaiting response...");
 
     const response = await result.response;
     const text = await result.text;
+    debugLog(`SDK turn done — text=${text.length}chars, messages=${response.messages.length}`);
 
     return {
       text: text || "(No response from LLM)",
@@ -445,7 +506,7 @@ async function runSdkTurn(
     clearTimeout(timeout);
 
     if (abortController.signal.aborted) {
-      throw new Error("Response timed out after 90 seconds. Please try again.");
+      throw new Error(`Response timed out after ${TURN_TIMEOUT_MS / 1000}s. Please try again.`);
     }
 
     const message = error instanceof Error ? error.message : String(error);
@@ -542,6 +603,21 @@ async function summarizeForCompaction(
       instructions: summaryInstruction,
       input: codexInput,
       timeoutMs: 60_000,
+    });
+    return result.text || "No summary generated.";
+  }
+
+  if (provider === "openai") {
+    // OpenAI Responses API path — same protocol, different URL/auth
+    const apiKey = getOpenAIApiKey();
+    const codexInput = convertToCodexInput(messages);
+    const result = await callCodex({
+      accessToken: apiKey,
+      model: modelName ?? "gpt-4o-mini",
+      instructions: summaryInstruction,
+      input: codexInput,
+      timeoutMs: 60_000,
+      baseUrl: OPENAI_RESPONSES_URL,
     });
     return result.text || "No summary generated.";
   }

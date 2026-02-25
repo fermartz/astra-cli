@@ -21,7 +21,7 @@ interface ProviderChoice {
 const DEFAULT_MODELS: Record<string, string> = {
   "openai-oauth": "gpt-5.3-codex",
   claude: "claude-sonnet-4-20250514",
-  openai: "gpt-5.1",
+  openai: "gpt-4o-mini",
   google: "gemini-2.0-flash",
   ollama: "llama3.1",
 };
@@ -48,7 +48,7 @@ export async function selectProvider(): Promise<ProviderChoice> {
         {
           value: "openai",
           label: "GPT (OpenAI)",
-          hint: "coming soon",
+          hint: "API key",
         },
         {
           value: "google",
@@ -68,10 +68,10 @@ export async function selectProvider(): Promise<ProviderChoice> {
       process.exit(0);
     }
 
-    // OpenAI, Gemini, Ollama deferred — ship with Claude + Codex only
-    if (provider === "openai" || provider === "google" || provider === "ollama") {
-      const names: Record<string, string> = { openai: "OpenAI", google: "Gemini", ollama: "Ollama" };
-      clack.log.warn(`${names[provider as string]} support is coming soon. Please choose Claude or ChatGPT/Codex for now.`);
+    // Gemini, Ollama deferred
+    if (provider === "google" || provider === "ollama") {
+      const names: Record<string, string> = { google: "Gemini", ollama: "Ollama" };
+      clack.log.warn(`${names[provider as string]} support is coming soon. Please choose another provider for now.`);
       continue;
     }
 

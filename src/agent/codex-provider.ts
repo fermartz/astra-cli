@@ -94,8 +94,9 @@ export async function callCodex(params: {
   abortSignal?: AbortSignal;
   callbacks?: CodexStreamCallbacks;
   timeoutMs?: number;
+  baseUrl?: string;
 }): Promise<CodexResult> {
-  const { accessToken, model, instructions, input, tools, abortSignal, callbacks, timeoutMs = 90_000 } = params;
+  const { accessToken, model, instructions, input, tools, abortSignal, callbacks, timeoutMs = 90_000, baseUrl = CODEX_BASE_URL } = params;
 
   // Per-call timeout via internal AbortController
   const controller = new AbortController();
@@ -125,7 +126,7 @@ export async function callCodex(params: {
       body.tool_choice = "auto";
     }
 
-    const response = await fetch(CODEX_BASE_URL, {
+    const response = await fetch(baseUrl, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -145,11 +146,11 @@ export async function callCodex(params: {
         // Use raw text if not JSON
         if (errorText) detail = errorText.slice(0, 200);
       }
-      throw new Error(`Codex API error: ${detail}`);
+      throw new Error(`Responses API error: ${detail}`);
     }
 
     if (!response.body) {
-      throw new Error("Codex API returned no response body");
+      throw new Error("Responses API returned no response body");
     }
 
     return await parseSSEStream(response.body, callbacks);
@@ -385,13 +386,13 @@ async function parseSSEStream(
 
   // Stalled stream — throw so retry logic can handle it
   if (idleAborted) {
-    throw new Error("Codex API stream stalled — no data received for 45 seconds.");
+    throw new Error("Responses API stream stalled — no data received for 45 seconds.");
   }
 
   // If stream produced nothing usable and had parse failures, the API format may have changed
   if (parseFailures > 0 && fullText === "" && toolCalls.size === 0) {
     throw new Error(
-      `Codex API returned no usable events (${parseFailures} parse failures). The API format may have changed.`,
+      `Responses API returned no usable events (${parseFailures} parse failures). The API format may have changed.`,
     );
   }
 
