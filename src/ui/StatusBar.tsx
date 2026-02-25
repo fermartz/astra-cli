@@ -118,9 +118,6 @@ const StatusBar = React.memo(function StatusBar({
           </>
         )}
       </Box>
-      <Box width="100%">
-        <Text color="green">{"─".repeat(process.stdout.columns || 80)}</Text>
-      </Box>
     </Box>
   );
 });

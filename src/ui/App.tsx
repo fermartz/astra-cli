@@ -105,6 +105,14 @@ export default function App({
                 "  `/buy <amt>` — Buy $NOVA (e.g. `/buy 500`)",
                 "  `/sell <amt>`— Sell $NOVA (e.g. `/sell 200`)",
                 "",
+                "**Ask me about**",
+                "",
+                "  \"how do epochs and seasons work?\"",
+                "  \"what are the trading rules?\"",
+                "  \"how do I earn $ASTRA?\"",
+                "  \"show the season leaderboard\"",
+                "  \"what is $ASTRA token supply?\"",
+                "",
                 "**System**",
                 "",
                 "  `/help`      — Show this help",
@@ -249,19 +257,19 @@ export default function App({
 
   return (
     <Box flexDirection="column" width="100%" height="100%">
-      <Box flexShrink={0} width="100%">
-        <StatusBar agentName={agentName} journeyStage={profile.journeyStage ?? "full"} />
-      </Box>
-
-      <Box flexDirection="column" flexGrow={1} flexShrink={1} borderStyle="single" borderColor="cyan">
+      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
         <ChatView messages={chatMessages} streamingText={streamingText} />
       </Box>
 
       {isLoading && toolName && <Spinner label={`Calling ${toolName}...`} />}
-      {isLoading && !toolName && streamingText === "" && <Spinner />}
+      {isLoading && !toolName && <Spinner label={streamingText ? "Thinking..." : undefined} />}
 
       <Box flexShrink={0} width="100%">
         <Input isActive={!isLoading} onSubmit={handleSubmit} />
+      </Box>
+
+      <Box flexShrink={0} width="100%">
+        <StatusBar agentName={agentName} journeyStage={profile.journeyStage ?? "full"} />
       </Box>
 
       <Box flexShrink={0} width="100%" paddingX={2} justifyContent="space-between">
