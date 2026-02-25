@@ -98,9 +98,11 @@ async function runCodexTurn(
           for (const part of m.content) {
             if (part.type === "tool-call") {
               const tc = part as { type: "tool-call"; toolCallId: string; toolName: string; args: unknown };
+              // Codex API requires `id` to start with "fc_" — generate one if needed
+              const fcId = tc.toolCallId.startsWith("fc_") ? tc.toolCallId : `fc_${tc.toolCallId}`;
               codexInput.push({
                 type: "function_call",
-                id: tc.toolCallId,
+                id: fcId,
                 call_id: tc.toolCallId,
                 name: tc.toolName,
                 arguments: JSON.stringify(tc.args),
