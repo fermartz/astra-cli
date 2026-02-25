@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef } from "react";
-import { Box, useApp, useInput } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
 import type { CoreMessage } from "ai";
 import StatusBar from "./StatusBar.js";
 import ChatView, { type ChatMessage } from "./ChatView.js";
@@ -60,8 +60,89 @@ export default function App({
     }
   });
 
+
+
   const sendMessage = useCallback(
     async (userText: string) => {
+      // ── Slash commands (handled locally, never sent to LLM) ────
+      if (userText.startsWith("/")) {
+        const cmd = userText.split(" ")[0].toLowerCase();
+
+        if (cmd === "/exit" || cmd === "/quit" || cmd === "/q") {
+          exit();
+          return;
+        }
+
+        if (cmd === "/clear") {
+          setChatMessages([]);
+          return;
+        }
+
+        if (cmd === "/compact") {
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "user", content: userText },
+            { role: "assistant", content: "Manual compaction is not implemented yet — it happens automatically when context gets large." },
+          ]);
+          return;
+        }
+
+        if (cmd === "/help" || cmd === "/?") {
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "user", content: userText },
+            {
+              role: "assistant",
+              content: [
+                "**Quick Actions**",
+                "",
+                "  `/portfolio` — Show portfolio card",
+                "  `/market`    — Current price, mood & trend",
+                "  `/rewards`   — Check claimable $ASTRA",
+                "  `/trades`    — Recent trade history",
+                "  `/board`     — Browse the board",
+                "  `/wallet`    — Check wallet status",
+                "  `/buy <amt>` — Buy $NOVA (e.g. `/buy 500`)",
+                "  `/sell <amt>`— Sell $NOVA (e.g. `/sell 200`)",
+                "",
+                "**System**",
+                "",
+                "  `/help`      — Show this help",
+                "  `/exit`      — Exit (also `/quit`, `/q`)",
+                "  `/clear`     — Clear chat display",
+                "  `Ctrl+C`     — Exit immediately",
+              ].join("\n"),
+            },
+          ]);
+          return;
+        }
+
+        // ── Shortcut commands (sent to LLM as natural language) ────
+        const shortcuts: Record<string, string> = {
+          "/portfolio": "Show my portfolio using the card format.",
+          "/market": "Show the current market state — price, mood, and recent trend.",
+          "/rewards": "Check my rewards status and show if anything is claimable.",
+          "/trades": "Show my recent trade history.",
+          "/board": "Show recent posts from the board.",
+          "/wallet": "Check my wallet status — do I have one set up?",
+          "/buy": `Buy ${userText.split(" ").slice(1).join(" ") || "some"} $NOVA.`,
+          "/sell": `Sell ${userText.split(" ").slice(1).join(" ") || "some"} $NOVA.`,
+        };
+
+        if (shortcuts[cmd]) {
+          // Fall through to normal sendMessage flow with the mapped text
+          userText = shortcuts[cmd];
+        } else {
+          // Unknown slash command — show hint
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "user", content: userText },
+            { role: "assistant", content: `Unknown command: ${cmd}. Type /help for available commands.` },
+          ]);
+          return;
+        }
+      }
+
       setChatMessages((prev) => [
         ...prev,
         { role: "user", content: userText },
@@ -172,13 +253,20 @@ export default function App({
         <StatusBar agentName={agentName} journeyStage={profile.journeyStage ?? "full"} />
       </Box>
 
-      <ChatView messages={chatMessages} streamingText={streamingText} />
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} borderStyle="single" borderColor="cyan">
+        <ChatView messages={chatMessages} streamingText={streamingText} />
+      </Box>
 
       {isLoading && toolName && <Spinner label={`Calling ${toolName}...`} />}
       {isLoading && !toolName && streamingText === "" && <Spinner />}
 
       <Box flexShrink={0} width="100%">
         <Input isActive={!isLoading} onSubmit={handleSubmit} />
+      </Box>
+
+      <Box flexShrink={0} width="100%" paddingX={2} justifyContent="space-between">
+        <Text dimColor>/help · /portfolio · /market · /exit</Text>
+        <Text dimColor>Ctrl+C quit</Text>
       </Box>
     </Box>
   );

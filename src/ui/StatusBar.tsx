@@ -34,7 +34,6 @@ const StatusBar = React.memo(function StatusBar({
   // Single state object to batch market + portfolio updates into one render
   const [data, setData] = useState<BarData>({ market: null, portfolio: null });
   const mounted = useRef(true);
-
   const canFetchData = journeyStage !== "fresh" && journeyStage !== "pending";
 
   const poll = useCallback(async () => {
@@ -66,62 +65,59 @@ const StatusBar = React.memo(function StatusBar({
   const { market, portfolio } = data;
 
   return (
-    <Box
-      width="100%"
-      borderStyle="single"
-      borderColor="green"
-      paddingX={1}
-    >
-      <Text bold color="green">
-        AstraNova
-      </Text>
-      <Text dimColor> │ </Text>
-      <Text color="white">{agentName}</Text>
+    <Box width="100%" borderStyle="round" borderColor="green">
+      <Box paddingX={1}>
+        <Text bold color="green">
+          AstraNova
+        </Text>
+        <Text dimColor> │ </Text>
+        <Text color="white">{agentName}</Text>
 
-      {canFetchData && market && (
-        <>
-          <Text dimColor> │ </Text>
-          <Text color="yellow">$NOVA </Text>
-          <Text color="white">{formatPrice(market.price)}</Text>
-          <Text dimColor> │ </Text>
-          <Text color={moodColor(market.mood)}>{market.mood}</Text>
-        </>
-      )}
+        {canFetchData && market && (
+          <>
+            <Text dimColor> │ </Text>
+            <Text color="yellow">$NOVA </Text>
+            <Text color="white">{formatPrice(market.price)}</Text>
+            <Text dimColor> │ </Text>
+            <Text color={moodColor(market.mood)}>{market.mood}</Text>
+          </>
+        )}
 
-      {canFetchData && portfolio && (
-        <>
-          <Text dimColor> │ </Text>
-          <Text color="cyan">{formatNum(portfolio.cash)} $SIM</Text>
-          {portfolio.tokens > 0 && (
-            <>
-              <Text dimColor> │ </Text>
-              <Text color="magenta">{formatNum(portfolio.tokens)} $NOVA</Text>
-            </>
-          )}
-          {portfolio.pnl !== 0 && (
-            <>
-              <Text dimColor> │ </Text>
-              <Text color={portfolio.pnl >= 0 ? "green" : "red"}>
-                P&L {portfolio.pnl >= 0 ? "+" : ""}{formatNum(portfolio.pnl)} ({portfolio.pnlPct >= 0 ? "+" : ""}{portfolio.pnlPct.toFixed(1)}%)
-              </Text>
-            </>
-          )}
-        </>
-      )}
+        {canFetchData && portfolio && (
+          <>
+            <Text dimColor> │ </Text>
+            <Text color="cyan">{formatNum(portfolio.cash)} $SIM</Text>
+            {portfolio.tokens > 0 && (
+              <>
+                <Text dimColor> │ </Text>
+                <Text color="magenta">{formatNum(portfolio.tokens)} $NOVA</Text>
+              </>
+            )}
+            {portfolio.pnl !== 0 && (
+              <>
+                <Text dimColor> │ </Text>
+                <Text color={portfolio.pnl >= 0 ? "green" : "red"}>
+                  P&L {portfolio.pnl >= 0 ? "+" : ""}{formatNum(portfolio.pnl)} ({portfolio.pnlPct >= 0 ? "+" : ""}{portfolio.pnlPct.toFixed(1)}%)
+                </Text>
+              </>
+            )}
+          </>
+        )}
 
-      {!canFetchData && (
-        <>
-          <Text dimColor> │ </Text>
-          <Text dimColor>pending verification</Text>
-        </>
-      )}
+        {!canFetchData && (
+          <>
+            <Text dimColor> │ </Text>
+            <Text dimColor>pending verification</Text>
+          </>
+        )}
 
-      {canFetchData && !market && !portfolio && (
-        <>
-          <Text dimColor> │ </Text>
-          <Text dimColor>loading...</Text>
-        </>
-      )}
+        {canFetchData && !market && !portfolio && (
+          <>
+            <Text dimColor> │ </Text>
+            <Text dimColor>loading...</Text>
+          </>
+        )}
+      </Box>
     </Box>
   );
 });
