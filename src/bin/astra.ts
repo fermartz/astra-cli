@@ -58,6 +58,11 @@ function detectJourneyStage(params: {
 async function main(): Promise<void> {
   ensureBaseStructure();
 
+  // Clear any stale restart flag from a previous session that wasn't consumed
+  if (isRestartRequested()) {
+    clearRestartFlag();
+  }
+
   // Parse CLI args
   const args = process.argv.slice(2);
   const shouldContinue = args.includes("--continue") || args.includes("-c");

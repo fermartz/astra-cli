@@ -269,6 +269,63 @@ If verification fails:
 - Be patient — they might need a few minutes to post the tweet.`;
 }
 
+// ─── Context Refresh (for compaction) ─────────────────────────────────
+
+/**
+ * Wallet registration flow reminder — 6-step sequence.
+ * Injected after compaction so the LLM doesn't lose procedural knowledge.
+ */
+export function getWalletFlowRefresh(): string {
+  return `Wallet flow: read_config(wallet) → create_wallet → api_call POST /api/v1/agents/me/wallet/challenge → sign_challenge → api_call PUT /api/v1/agents/me/wallet → api_call GET /api/v1/agents/me (verify). Run all steps automatically without stopping.`;
+}
+
+/**
+ * Reward claim flow reminder — 3-step sequence.
+ */
+export function getRewardClaimRefresh(): string {
+  return `Claim flow: api_call POST /api/v1/agents/me/rewards/claim → sign_and_send_transaction(base64) → api_call POST /api/v1/agents/me/rewards/confirm(txSignature). Run all steps automatically.`;
+}
+
+/**
+ * Build a compact context refresh block from the agent profile.
+ * Used after compaction to re-inject critical state (~500 tokens max).
+ */
+export function buildContextRefresh(profile: AgentProfile): string {
+  const stage = profile.journeyStage ?? "full";
+  const parts: string[] = [
+    "## Current Context (refreshed after compaction)",
+    "",
+    `Agent: ${profile.agentName}`,
+    `Status: ${profile.status ?? "unknown"}`,
+    `Journey Stage: ${stage}`,
+  ];
+
+  if (profile.simBalance !== undefined) {
+    parts.push(`$SIM Balance: ${profile.simBalance.toLocaleString()}`);
+  }
+  if (profile.novaHoldings !== undefined) {
+    parts.push(`$NOVA Holdings: ${profile.novaHoldings.toLocaleString()}`);
+  }
+
+  parts.push(`Wallet: ${profile.walletAddress ?? "not set"}`);
+
+  if (profile.verificationCode) {
+    parts.push(`Verification Code: ${profile.verificationCode}`);
+  }
+
+  // Stage-conditional flow reminders
+  if (stage === "trading" || stage === "verified") {
+    parts.push("", getWalletFlowRefresh());
+  }
+  if (stage === "wallet_ready" || stage === "full") {
+    parts.push("", getRewardClaimRefresh());
+  }
+
+  parts.push("", "Use your tools (api_call, create_wallet, etc.) — not scripts or curl.");
+
+  return parts.join("\n");
+}
+
 // ─── Tool Overrides ───────────────────────────────────────────────────
 
 const TOOL_OVERRIDES = `## IMPORTANT — Tool Usage Overrides

@@ -130,12 +130,30 @@ npm i -g @astra/cli   # Global install → `astra` command
 | 1 | Retry with Backoff | Done |
 | 2 | Audit Log | Done |
 | 3 | Session Persistence + Memory | Done |
-| 4 | Context Compaction | **Next** — pick up here |
+| 4 | Context Compaction | Done (uncommitted) |
 | 5 | Trade Approval Gate | Pending |
-| 6 | Post-Compaction Context Refresh | Pending |
+| 6 | Post-Compaction Context Refresh | Done (merged into #4) |
 | 7 | Market Heartbeat | Pending |
 
-**We stopped at #4 (Context Compaction) and will come back to continue.**
+**Codex Provider Hardening:** See `docs/CODEX-PROVIDER-HARDENING.md` for full audit.
+
+| ID | Issue | Status |
+|----|-------|--------|
+| C1 | `response.failed` SSE handling | Done (uncommitted) |
+| C2 | `response.incomplete` SSE handling | Done (uncommitted) |
+| C3 | Stale token in multi-step tool loop | Done (uncommitted) |
+| H1-H5 | Idle timeout, parse failures, retry, per-call timeout | Done (uncommitted) |
+| M2 | Duplicate text accumulation | Done (uncommitted) |
+| M3 | `extractJsonSchema` silently returns `{}` | **Next** |
+| M4 | `ensureFreshToken` mutates config object | Pending |
+| M5 | No timeout on OAuth fetch calls | Pending |
+| M6 | `expires_in: 0` gives 30s validity window | Pending |
+| H6/H7 | Concurrent refresh mutex, mid-stream 401 | Deferred |
+| L1-L3 | tool_choice, token tracking, event: prefix | Deferred |
+
+**Test gap:** `callCodex`, `callCodexWithRetry`, `parseSSEStream` have no unit tests.
+
+**All "Done (uncommitted)" items need to be committed after testing.**
 
 ## Future Improvements
 

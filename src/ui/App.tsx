@@ -100,12 +100,28 @@ export default function App({
           memoryContent,
         );
 
-        const updatedChat = [
-          ...chatMessages,
-          { role: "user" as const, content: userText },
-          { role: "assistant" as const, content: result.text },
-        ];
-        const updatedCore = [...newCoreMessages, ...result.responseMessages];
+        // If compaction occurred, use the compacted messages as the new base
+        const baseCoreMessages = result.compactedMessages ?? newCoreMessages;
+        const updatedCore = [...baseCoreMessages, ...result.responseMessages];
+
+        let updatedChat: ChatMessage[];
+        if (result.compactedMessages) {
+          // Trim display messages — show a marker + recent messages
+          const marker: ChatMessage = { role: "assistant", content: "— earlier messages compacted —" };
+          const recentChat = chatMessages.slice(-12);
+          updatedChat = [
+            marker,
+            ...recentChat,
+            { role: "user" as const, content: userText },
+            { role: "assistant" as const, content: result.text },
+          ];
+        } else {
+          updatedChat = [
+            ...chatMessages,
+            { role: "user" as const, content: userText },
+            { role: "assistant" as const, content: result.text },
+          ];
+        }
 
         setChatMessages(updatedChat);
         setCoreMessages(updatedCore);
