@@ -3,6 +3,11 @@ import { apiCallSchema } from "./schemas.js";
 import { apiCall } from "../utils/http.js";
 import { getActiveAgent, markBoardPosted } from "../config/store.js";
 
+const DEBUG = !!process.env.ASTRA_DEBUG;
+function debugLog(msg: string): void {
+  if (DEBUG) process.stderr.write(`[astra] ${msg}\n`);
+}
+
 /**
  * Allowed API path prefixes — defense in depth.
  * The LLM can only call AstraNova API paths, not arbitrary URLs.
@@ -48,7 +53,7 @@ function resolveBody(
 
   // Case 2 & 4: body missing/null, check for flattened params
   if (Object.keys(rest).length > 0 && method !== "GET") {
-    process.stderr.write(`[astra] api_call: recovering flattened body: ${JSON.stringify(rest)}\n`);
+    debugLog(`api_call: recovering flattened body: ${JSON.stringify(rest)}`);
     return rest;
   }
 
@@ -89,9 +94,9 @@ export const apiCallTool = tool({
       };
     }
 
+    debugLog(`api_call raw: method=${method} path=${path} body=${JSON.stringify(body)} bodyType=${typeof body} rest=${JSON.stringify(rest)}`);
     const resolvedBody = resolveBody(body, rest, method);
-
-    process.stderr.write(`[astra] api_call: ${method} ${path} body=${JSON.stringify(resolvedBody)}\n`);
+    debugLog(`api_call resolved: ${method} ${path} body=${JSON.stringify(resolvedBody)}`);
 
     const agentName = getActiveAgent();
 

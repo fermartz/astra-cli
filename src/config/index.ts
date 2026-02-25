@@ -2,6 +2,7 @@ export {
   ASTRANOVA_DIR,
   AGENTS_DIR,
   CACHE_DIR,
+  getRoot,
   configPath,
   activeAgentPath,
   agentDir,

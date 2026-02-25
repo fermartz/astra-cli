@@ -11,7 +11,7 @@ export const apiCallSchema = z.object({
     .record(z.unknown())
     .optional()
     .describe("JSON body for POST/PUT/PATCH requests"),
-});
+}).passthrough(); // Allow extra keys — LLMs sometimes flatten body params
 
 export const readConfigSchema = z.object({
   key: z.enum(["profile", "wallet", "all_agents", "settings"]),

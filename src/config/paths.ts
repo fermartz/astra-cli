@@ -5,33 +5,47 @@ import fs from "node:fs";
 /**
  * Root config directory — matches AstraNova API convention.
  * All agent data lives under ~/.config/astranova/
+ *
+ * Override with ASTRA_TEST_DIR env var for isolated testing.
+ * Uses a getter so tests can set the env var after import.
  */
-export const ASTRANOVA_DIR = path.join(os.homedir(), ".config", "astranova");
+const _defaultRoot = path.join(os.homedir(), ".config", "astranova");
 
-/** Directory containing all agent subdirectories. */
-export const AGENTS_DIR = path.join(ASTRANOVA_DIR, "agents");
+/** @internal Resolve root — checks env var each call for test isolation. */
+function _root(): string {
+  return process.env.ASTRA_TEST_DIR ?? _defaultRoot;
+}
 
-/** Cache directory for remote context files (skill.md, etc). */
-export const CACHE_DIR = path.join(ASTRANOVA_DIR, ".cache");
+/** Get the current root directory (dynamic, respects ASTRA_TEST_DIR). */
+export function getRoot(): string {
+  return _root();
+}
+
+// Exported as a getter-backed property so it always reflects the current env.
+// Modules that destructure `import { ASTRANOVA_DIR }` will get the value at import time,
+// but functions that call configPath()/agentDir()/etc. always resolve dynamically.
+export const ASTRANOVA_DIR = _defaultRoot;
+export const AGENTS_DIR = path.join(_defaultRoot, "agents");
+export const CACHE_DIR = path.join(_defaultRoot, ".cache");
 
 /** Path to the CLI config file (LLM provider, model, preferences). */
 export function configPath(): string {
-  return path.join(ASTRANOVA_DIR, "config.json");
+  return path.join(_root(), "config.json");
 }
 
 /** Path to the active agent marker file (plain text, agent name). */
 export function activeAgentPath(): string {
-  return path.join(ASTRANOVA_DIR, "active_agent");
+  return path.join(_root(), "active_agent");
 }
 
 /** Path to the global state file. */
 export function statePath(): string {
-  return path.join(ASTRANOVA_DIR, "state.json");
+  return path.join(_root(), "state.json");
 }
 
 /** Path to a specific agent's directory. */
 export function agentDir(agentName: string): string {
-  return path.join(AGENTS_DIR, agentName);
+  return path.join(_root(), "agents", agentName);
 }
 
 /** Path to an agent's credentials file. */
@@ -46,7 +60,7 @@ export function walletPath(agentName: string): string {
 
 /** Path to the audit log file. */
 export function auditLogPath(): string {
-  return path.join(ASTRANOVA_DIR, "audit.log");
+  return path.join(_root(), "audit.log");
 }
 
 /** Directory containing session files for an agent. */
@@ -61,7 +75,7 @@ export function memoryPath(agentName: string): string {
 
 /** Path to a cached remote file (e.g., skill.md). */
 export function cachePath(fileName: string): string {
-  return path.join(CACHE_DIR, fileName);
+  return path.join(_root(), ".cache", fileName);
 }
 
 /**
@@ -73,8 +87,9 @@ export function ensureDir(dirPath: string): void {
     fs.mkdirSync(dirPath, { recursive: true });
   }
 
-  // If this is the root astranova dir or agents dir, restrict access
-  if (dirPath === ASTRANOVA_DIR || dirPath.startsWith(AGENTS_DIR)) {
+  // If this is under the astranova dir, restrict access
+  const root = _root();
+  if (dirPath === root || dirPath.startsWith(path.join(root, "agents"))) {
     fs.chmodSync(dirPath, 0o700);
   }
 }
@@ -84,7 +99,8 @@ export function ensureDir(dirPath: string): void {
  * Called once at startup.
  */
 export function ensureBaseStructure(): void {
-  ensureDir(ASTRANOVA_DIR);
-  ensureDir(AGENTS_DIR);
-  ensureDir(CACHE_DIR);
+  const root = _root();
+  ensureDir(root);
+  ensureDir(path.join(root, "agents"));
+  ensureDir(path.join(root, ".cache"));
 }

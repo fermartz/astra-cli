@@ -1,5 +1,6 @@
 import fs from "node:fs";
-import { cachePath, ensureDir, CACHE_DIR } from "../config/paths.js";
+import { cachePath, ensureDir, getRoot } from "../config/paths.js";
+import path from "node:path";
 
 interface CacheMeta {
   fetchedAt: string;
@@ -20,7 +21,7 @@ export async function getCached(
   url: string,
   ttlMs: number,
 ): Promise<string | null> {
-  ensureDir(CACHE_DIR);
+  ensureDir(path.join(getRoot(), ".cache"));
 
   const contentPath = cachePath(name);
   const meta = readMeta(name);

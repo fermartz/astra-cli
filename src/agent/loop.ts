@@ -11,6 +11,12 @@ import { writeAuditEntry } from "../utils/audit.js";
 /** Maximum time (ms) for a single agent turn before we abort. */
 const TURN_TIMEOUT_MS = 90_000; // 90 seconds
 
+/** Debug logging — only outputs when ASTRA_DEBUG env var is set. */
+const DEBUG = !!process.env.ASTRA_DEBUG;
+function debugLog(msg: string): void {
+  if (DEBUG) process.stderr.write(`[astra] ${msg}\n`);
+}
+
 export interface AgentLoopCallbacks {
   /** Called with each text chunk as the LLM streams its response. */
   onTextChunk: (chunk: string) => void;
@@ -72,13 +78,57 @@ async function runCodexTurn(
     const config = loadConfig();
     const model = config?.model ?? "gpt-5.3-codex";
 
-    // Convert CoreMessage[] to Codex input items
-    const codexInput: CodexInputItem[] = messages
-      .filter((m) => m.role === "user" || m.role === "assistant")
-      .map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
-      }));
+    // Convert CoreMessage[] to Codex input items — preserve tool call context
+    const codexInput: CodexInputItem[] = [];
+    for (const m of messages) {
+      if (m.role === "user" || m.role === "assistant") {
+        // Assistant messages with tool_calls content parts need special handling
+        if (m.role === "assistant" && Array.isArray(m.content)) {
+          // Extract text parts as assistant message
+          const textParts = m.content.filter(
+            (p): p is { type: "text"; text: string } => p.type === "text",
+          );
+          if (textParts.length > 0) {
+            codexInput.push({
+              role: "assistant",
+              content: textParts.map((p) => p.text).join(""),
+            });
+          }
+          // Extract tool-call parts as function_call items
+          for (const part of m.content) {
+            if (part.type === "tool-call") {
+              const tc = part as { type: "tool-call"; toolCallId: string; toolName: string; args: unknown };
+              codexInput.push({
+                type: "function_call",
+                id: tc.toolCallId,
+                call_id: tc.toolCallId,
+                name: tc.toolName,
+                arguments: JSON.stringify(tc.args),
+              });
+            }
+          }
+        } else {
+          codexInput.push({
+            role: m.role as "user" | "assistant",
+            content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+          });
+        }
+      } else if (m.role === "tool") {
+        // Tool result messages — map to function_call_output
+        if (Array.isArray(m.content)) {
+          for (const part of m.content) {
+            if (part.type === "tool-result") {
+              const tr = part as { type: "tool-result"; toolCallId: string; result: unknown };
+              codexInput.push({
+                type: "function_call_output",
+                call_id: tr.toolCallId,
+                output: JSON.stringify(tr.result),
+              });
+            }
+          }
+        }
+      }
+    }
 
     // Convert tools to Codex format — extract JSON schema from Zod-based tools
     const codexTools = convertToolsForCodex(
@@ -93,8 +143,9 @@ async function runCodexTurn(
       ),
     );
 
-    // Accumulate text across all LLM responses (not just the last one)
+    // Accumulate text and structured response messages for session persistence
     let accumulatedText = "";
+    const responseMessages: CoreMessage[] = [];
 
     // First call
     let result = await callCodex({
@@ -110,15 +161,41 @@ async function runCodexTurn(
 
     // Handle tool calls (up to 10 steps — wallet registration needs ~6)
     let steps = 0;
-    process.stderr.write(`[astra] Codex response: text=${result.text.length}chars, toolCalls=${result.toolCalls.map(tc => tc.name).join(",") || "none"}\n`);
+    debugLog(`Codex response: text=${result.text.length}chars, toolCalls=${result.toolCalls.map(tc => tc.name).join(",") || "none"}`);
     while (result.toolCalls.length > 0 && steps < 10) {
       steps++;
 
-      // Execute each tool call and send results using proper Responses API format
+      // Build assistant message with text + tool calls for this step
+      const assistantContent: Array<{ type: string; [key: string]: unknown }> = [];
+      if (result.text) {
+        assistantContent.push({ type: "text", text: result.text });
+      }
+
+      // Collect tool results for this step
+      const toolResultParts: Array<{ type: string; [key: string]: unknown }> = [];
+
+      // Execute each tool call
       for (const tc of result.toolCalls) {
         const toolDef = astraTools[tc.name as keyof typeof astraTools];
+
+        // Add tool-call part to assistant message
+        let parsedArgs: Record<string, unknown> = {};
+        try { parsedArgs = JSON.parse(tc.arguments) as Record<string, unknown>; } catch { /* use empty */ }
+
+        assistantContent.push({
+          type: "tool-call",
+          toolCallId: tc.callId,
+          toolName: tc.name,
+          args: parsedArgs,
+        });
+
         if (!toolDef) {
-          // Echo the function_call back + error output
+          const errorResult = { error: `Tool "${tc.name}" not found.` };
+          toolResultParts.push({
+            type: "tool-result",
+            toolCallId: tc.callId,
+            result: errorResult,
+          });
           codexInput.push({
             type: "function_call",
             id: tc.id,
@@ -129,25 +206,24 @@ async function runCodexTurn(
           codexInput.push({
             type: "function_call_output",
             call_id: tc.callId,
-            output: JSON.stringify({ error: `Tool "${tc.name}" not found.` }),
+            output: JSON.stringify(errorResult),
           });
           continue;
         }
 
         callbacks.onToolCallStart?.(tc.name);
-
         const startTime = Date.now();
+
         try {
-          const args = JSON.parse(tc.arguments) as Record<string, unknown>;
-          process.stderr.write(`[astra] Tool ${tc.name}(${tc.callId}) args: ${JSON.stringify(args)}\n`);
+          debugLog(`Tool ${tc.name}(${tc.callId}) args: ${JSON.stringify(parsedArgs)}`);
           const execute = (toolDef as unknown as { execute: (args: Record<string, unknown>, options: Record<string, unknown>) => Promise<unknown> }).execute;
-          const toolResult = await execute(args, {});
-          process.stderr.write(`[astra] Tool ${tc.name}(${tc.callId}) result: ${JSON.stringify(toolResult).slice(0, 200)}\n`);
+          const toolResult = await execute(parsedArgs, {});
+          debugLog(`Tool ${tc.name}(${tc.callId}) result: ${JSON.stringify(toolResult).slice(0, 200)}`);
 
           writeAuditEntry({
             ts: new Date().toISOString(),
             tool: tc.name,
-            args,
+            args: parsedArgs,
             result: toolResult,
             ok: !(toolResult as Record<string, unknown>)?.error,
             durationMs: Date.now() - startTime,
@@ -155,7 +231,11 @@ async function runCodexTurn(
 
           callbacks.onToolCallEnd?.(tc.name);
 
-          // Echo the model's function_call back (id = item ID), then provide the output (call_id = call ID)
+          toolResultParts.push({
+            type: "tool-result",
+            toolCallId: tc.callId,
+            result: toolResult,
+          });
           codexInput.push({
             type: "function_call",
             id: tc.id,
@@ -172,17 +252,23 @@ async function runCodexTurn(
           callbacks.onToolCallEnd?.(tc.name);
 
           const errMsg = toolError instanceof Error ? toolError.message : "Tool execution failed";
-          process.stderr.write(`[astra] Tool ${tc.name}(${tc.callId}) error: ${errMsg}\n`);
+          debugLog(`Tool ${tc.name}(${tc.callId}) error: ${errMsg}`);
+          const errorResult = { error: errMsg };
 
           writeAuditEntry({
             ts: new Date().toISOString(),
             tool: tc.name,
-            args: tc.arguments,
-            result: { error: errMsg },
+            args: parsedArgs,
+            result: errorResult,
             ok: false,
             durationMs: Date.now() - startTime,
           });
 
+          toolResultParts.push({
+            type: "tool-result",
+            toolCallId: tc.callId,
+            result: errorResult,
+          });
           codexInput.push({
             type: "function_call",
             id: tc.id,
@@ -193,12 +279,18 @@ async function runCodexTurn(
           codexInput.push({
             type: "function_call_output",
             call_id: tc.callId,
-            output: JSON.stringify({ error: errMsg }),
+            output: JSON.stringify(errorResult),
           });
         }
       }
 
-      // Call again with tool results in proper format
+      // Append structured messages for session persistence (matches SDK format)
+      responseMessages.push({ role: "assistant", content: assistantContent } as CoreMessage);
+      if (toolResultParts.length > 0) {
+        responseMessages.push({ role: "tool", content: toolResultParts } as CoreMessage);
+      }
+
+      // Call again with tool results
       result = await callCodex({
         accessToken,
         model,
@@ -209,16 +301,14 @@ async function runCodexTurn(
         callbacks,
       });
       accumulatedText += result.text;
-      process.stderr.write(`[astra] Codex step ${steps}: text=${result.text.length}chars, toolCalls=${result.toolCalls.map(tc => tc.name).join(",") || "none"}\n`);
+      debugLog(`Codex step ${steps}: text=${result.text.length}chars, toolCalls=${result.toolCalls.map(tc => tc.name).join(",") || "none"}`);
     }
 
-    process.stderr.write(`[astra] Codex loop done after ${steps} steps, totalText=${accumulatedText.length}chars\n`);
+    debugLog(`Codex loop done after ${steps} steps, totalText=${accumulatedText.length}chars`);
     const text = accumulatedText || "(No text response)";
 
-    // Build response messages for conversation history
-    const responseMessages: CoreMessage[] = [
-      { role: "assistant", content: text },
-    ];
+    // Add final text-only assistant message
+    responseMessages.push({ role: "assistant", content: text });
 
     return { text, responseMessages };
   } catch (error: unknown) {
@@ -229,7 +319,7 @@ async function runCodexTurn(
     }
 
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`[astra] Codex error: ${message}\n`);
+    debugLog(`Codex error: ${message}`);
     throw error;
   } finally {
     clearTimeout(timeout);
@@ -295,7 +385,7 @@ async function runSdkTurn(
     }
 
     const message = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`[astra] Agent loop error: ${message}\n`);
+    debugLog(`Agent loop error: ${message}`);
     throw error;
   } finally {
     clearTimeout(timeout);

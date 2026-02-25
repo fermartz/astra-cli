@@ -10,8 +10,7 @@ import {
   agentDir,
   ensureDir,
   ensureBaseStructure,
-  AGENTS_DIR,
-  ASTRANOVA_DIR,
+  getRoot,
 } from "./paths.js";
 import {
   ConfigSchema,
@@ -175,17 +174,17 @@ export function saveWallet(agentName: string, wallet: Wallet): void {
 
 /** Check if a restart was requested (e.g., after agent switch/create). */
 export function isRestartRequested(): boolean {
-  return fs.existsSync(path.join(ASTRANOVA_DIR, ".restart"));
+  return fs.existsSync(path.join(getRoot(), ".restart"));
 }
 
 /** Request a CLI restart (called by agent management tools). */
 export function requestRestart(): void {
-  writeFileSecure(path.join(ASTRANOVA_DIR, ".restart"), new Date().toISOString());
+  writeFileSecure(path.join(getRoot(), ".restart"), new Date().toISOString());
 }
 
 /** Clear the restart flag. */
 export function clearRestartFlag(): void {
-  const flagPath = path.join(ASTRANOVA_DIR, ".restart");
+  const flagPath = path.join(getRoot(), ".restart");
   if (fs.existsSync(flagPath)) {
     fs.unlinkSync(flagPath);
   }
@@ -212,12 +211,13 @@ export function markBoardPosted(agentName: string): void {
 
 /** List all agent names that have credentials saved locally. */
 export function listAgents(): string[] {
-  if (!fs.existsSync(AGENTS_DIR)) {
+  const agentsDir = path.join(getRoot(), "agents");
+  if (!fs.existsSync(agentsDir)) {
     return [];
   }
 
   return fs
-    .readdirSync(AGENTS_DIR, { withFileTypes: true })
+    .readdirSync(agentsDir, { withFileTypes: true })
     .filter((entry) => {
       if (!entry.isDirectory()) return false;
       return fs.existsSync(credentialsPath(entry.name));
