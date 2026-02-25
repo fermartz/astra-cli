@@ -130,8 +130,8 @@ npm i -g @astra/cli   # Global install → `astra` command
 | 1 | Retry with Backoff | Done |
 | 2 | Audit Log | Done |
 | 3 | Session Persistence + Memory | Done |
-| 4 | Context Compaction | Done (uncommitted) |
-| 5 | Trade Approval Gate | Pending |
+| 4 | Context Compaction | Done |
+| 5 | Trade Approval Gate | **Next** |
 | 6 | Post-Compaction Context Refresh | Done (merged into #4) |
 | 7 | Market Heartbeat | Pending |
 
@@ -139,11 +139,11 @@ npm i -g @astra/cli   # Global install → `astra` command
 
 | ID | Issue | Status |
 |----|-------|--------|
-| C1 | `response.failed` SSE handling | Done (uncommitted) |
-| C2 | `response.incomplete` SSE handling | Done (uncommitted) |
-| C3 | Stale token in multi-step tool loop | Done (uncommitted) |
-| H1-H5 | Idle timeout, parse failures, retry, per-call timeout | Done (uncommitted) |
-| M2 | Duplicate text accumulation | Done (uncommitted) |
+| C1 | `response.failed` SSE handling | Done |
+| C2 | `response.incomplete` SSE handling | Done |
+| C3 | Stale token in multi-step tool loop | Done |
+| H1-H5 | Idle timeout, parse failures, retry, per-call timeout | Done |
+| M2 | Duplicate text accumulation | Done |
 | M3 | `extractJsonSchema` silently returns `{}` | **Next** |
 | M4 | `ensureFreshToken` mutates config object | Pending |
 | M5 | No timeout on OAuth fetch calls | Pending |
@@ -151,9 +151,15 @@ npm i -g @astra/cli   # Global install → `astra` command
 | H6/H7 | Concurrent refresh mutex, mid-stream 401 | Deferred |
 | L1-L3 | tool_choice, token tracking, event: prefix | Deferred |
 
-**Test gap:** `callCodex`, `callCodexWithRetry`, `parseSSEStream` have no unit tests.
+**Resilient Retry:** Two-layer safety net for empty/broken LLM responses (commit `fb7555e`):
+- Layer 1 (Codex-specific): nudges LLM for summary when tools ran but no text returned
+- Layer 2 (all providers): detects sentinel empty responses, streams "Hold on..." to user, retries with nudge messages
 
-**All "Done (uncommitted)" items need to be committed after testing.**
+**Bug fixes (commit `fb7555e`):**
+- Stale `.restart` flag cleared at startup (prevented phantom CLI restarts after onboarding)
+- `convertToCodexInput` extracted as reusable function for compaction + main turn
+
+**Test gap:** `callCodex`, `callCodexWithRetry`, `parseSSEStream` have no unit tests.
 
 ## Future Improvements
 
