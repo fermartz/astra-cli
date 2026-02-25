@@ -1,6 +1,4 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
-import { createOpenAI } from "@ai-sdk/openai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { LanguageModelV1 } from "ai";
 import { loadConfig, saveConfig } from "../config/store.js";
 import type { Config } from "../config/schema.js";
@@ -93,21 +91,15 @@ function createModelFromConfig(config: Config): LanguageModelV1 {
       return anthropic(model);
     }
 
-    case "openai": {
-      if (auth.type !== "api-key" || !auth.apiKey) {
-        throw new Error("OpenAI requires an API key. Re-run onboarding to set one up.");
-      }
-      const openai = createOpenAI({ apiKey: auth.apiKey });
-      return openai(model);
-    }
+    case "openai":
+      throw new Error(
+        "OpenAI API support is coming soon. Please use Claude or ChatGPT/Codex.\nTo switch, delete ~/.config/astranova/config.json and re-run astra.",
+      );
 
-    case "google": {
-      if (auth.type !== "api-key" || !auth.apiKey) {
-        throw new Error("Google AI requires an API key. Re-run onboarding to set one up.");
-      }
-      const google = createGoogleGenerativeAI({ apiKey: auth.apiKey });
-      return google(model);
-    }
+    case "google":
+      throw new Error(
+        "Gemini support is coming soon. Please use Claude or ChatGPT/Codex.\nTo switch, delete ~/.config/astranova/config.json and re-run astra.",
+      );
 
     case "openai-oauth":
       // Codex OAuth uses custom SSE provider (not Vercel AI SDK).
@@ -116,7 +108,7 @@ function createModelFromConfig(config: Config): LanguageModelV1 {
 
     case "ollama":
       throw new Error(
-        "Ollama is not yet supported. Please choose Claude, OpenAI, Gemini, or ChatGPT/Codex.",
+        "Ollama support is coming soon. Please use Claude or ChatGPT/Codex.\nTo switch, delete ~/.config/astranova/config.json and re-run astra.",
       );
 
     default:

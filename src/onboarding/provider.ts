@@ -47,18 +47,18 @@ export async function selectProvider(): Promise<ProviderChoice> {
         },
         {
           value: "openai",
-          label: "GPT-5.1 (OpenAI)",
-          hint: "API key",
+          label: "GPT (OpenAI)",
+          hint: "coming soon",
         },
         {
           value: "google",
           label: "Gemini (Google)",
-          hint: "API key — free tier available",
+          hint: "coming soon",
         },
         {
           value: "ollama",
           label: "Local (Ollama)",
-          hint: "runs on your machine — coming soon",
+          hint: "coming soon",
         },
       ],
     });
@@ -68,9 +68,10 @@ export async function selectProvider(): Promise<ProviderChoice> {
       process.exit(0);
     }
 
-    // Ollama still deferred
-    if (provider === "ollama") {
-      clack.log.warn("Ollama support is coming soon. Please choose another provider for now.");
+    // OpenAI, Gemini, Ollama deferred — ship with Claude + Codex only
+    if (provider === "openai" || provider === "google" || provider === "ollama") {
+      const names: Record<string, string> = { openai: "OpenAI", google: "Gemini", ollama: "Ollama" };
+      clack.log.warn(`${names[provider as string]} support is coming soon. Please choose Claude or ChatGPT/Codex for now.`);
       continue;
     }
 

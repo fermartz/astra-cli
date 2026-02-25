@@ -9,12 +9,29 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "main": "./dist/astra.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "start": "node dist/astra.js",
     "dev": "tsup --watch",
     "build": "tsup",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "pnpm build"
+  },
+  "author": "fermartz",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fermartz/astra-cli.git"
+  },
+  "homepage": "https://github.com/fermartz/astra-cli",
+  "bugs": {
+    "url": "https://github.com/fermartz/astra-cli/issues"
   },
   "keywords": [
     "astranova",

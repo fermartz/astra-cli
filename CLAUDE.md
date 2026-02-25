@@ -151,6 +151,13 @@ npm i -g @astra/cli   # Global install → `astra` command
 | H6/H7 | Concurrent refresh mutex, mid-stream 401 | Deferred |
 | L1-L3 | tool_choice, token tracking, event: prefix | Deferred |
 
+**Pending Claim Cache:** Resilient reward claiming (commit `78e5762`):
+- Caches pending claim blob before signing so interrupted claims can be retried
+- `clearPendingClaim` called on successful claim in wallet.ts
+- Store functions in `src/config/store.ts`: `savePendingClaim`, `loadPendingClaim`, `clearPendingClaim`
+
+**Pre-Publish Provider Cleanup:** OpenAI API, Gemini, and Ollama marked as "coming soon" in onboarding and provider factory. Only Claude and Codex OAuth ship as active providers. SDK imports for disabled providers removed.
+
 **Resilient Retry:** Two-layer safety net for empty/broken LLM responses (commit `fb7555e`):
 - Layer 1 (Codex-specific): nudges LLM for summary when tools ran but no text returned
 - Layer 2 (all providers): detects sentinel empty responses, streams "Hold on..." to user, retries with nudge messages
