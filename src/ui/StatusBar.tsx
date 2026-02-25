@@ -65,7 +65,7 @@ const StatusBar = React.memo(function StatusBar({
   const { market, portfolio } = data;
 
   return (
-    <Box width="100%" borderStyle="round" borderColor="green">
+    <Box flexDirection="column" width="100%">
       <Box paddingX={1}>
         <Text bold color="green">
           AstraNova
@@ -117,6 +117,9 @@ const StatusBar = React.memo(function StatusBar({
             <Text dimColor>loading...</Text>
           </>
         )}
+      </Box>
+      <Box width="100%">
+        <Text color="green">{"─".repeat(process.stdout.columns || 80)}</Text>
       </Box>
     </Box>
   );
