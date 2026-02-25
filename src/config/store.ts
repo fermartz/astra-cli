@@ -7,6 +7,7 @@ import {
   statePath,
   credentialsPath,
   walletPath,
+  pendingClaimPath,
   agentDir,
   ensureDir,
   ensureBaseStructure,
@@ -203,6 +204,44 @@ export function hasBoardPost(agentName: string): boolean {
 export function markBoardPosted(agentName: string): void {
   ensureDir(agentDir(agentName));
   writeFileSecure(path.join(agentDir(agentName), "board_posted"), new Date().toISOString());
+}
+
+// ---------------------------------------------------------------------------
+// Pending Claim Cache (~/.config/astranova/agents/<name>/pending_claim.json)
+// ---------------------------------------------------------------------------
+
+export interface PendingClaim {
+  seasonId: string;
+  transaction: string;
+  expiresAt: string;
+  cachedAt: string;
+  retryCount: number;
+}
+
+/** Save a pending claim blob for retry. */
+export function savePendingClaim(agentName: string, data: PendingClaim): void {
+  ensureDir(agentDir(agentName));
+  writeFileSecure(pendingClaimPath(agentName), JSON.stringify(data, null, 2));
+}
+
+/** Load a pending claim blob. Returns null if not found or unparseable. */
+export function loadPendingClaim(agentName: string): PendingClaim | null {
+  const filePath = pendingClaimPath(agentName);
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    return JSON.parse(raw) as PendingClaim;
+  } catch {
+    return null;
+  }
+}
+
+/** Delete the pending claim cache. */
+export function clearPendingClaim(agentName: string): void {
+  const filePath = pendingClaimPath(agentName);
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
 }
 
 // ---------------------------------------------------------------------------

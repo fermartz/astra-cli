@@ -73,6 +73,11 @@ export function memoryPath(agentName: string): string {
   return path.join(agentDir(agentName), "memory.md");
 }
 
+/** Path to an agent's pending claim cache (transaction blob for retry). */
+export function pendingClaimPath(agentName: string): string {
+  return path.join(agentDir(agentName), "pending_claim.json");
+}
+
 /** Path to a cached remote file (e.g., skill.md). */
 export function cachePath(fileName: string): string {
   return path.join(_root(), ".cache", fileName);

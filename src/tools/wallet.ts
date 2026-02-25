@@ -16,6 +16,7 @@ import {
   getActiveAgent,
   loadWallet,
   saveWallet,
+  clearPendingClaim,
 } from "../config/store.js";
 
 // Default to devnet — can be overridden via config in the future
@@ -171,6 +172,11 @@ export const signAndSendTransactionTool = tool({
           error: `Transaction confirmed but failed: ${JSON.stringify(confirmation.value.err)}`,
           txSignature: signature,
         };
+      }
+
+      // Clear cached claim blob — transaction succeeded, no need for retry
+      if (agentName) {
+        clearPendingClaim(agentName);
       }
 
       return {

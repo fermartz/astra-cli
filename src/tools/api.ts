@@ -1,7 +1,13 @@
 import { tool } from "ai";
 import { apiCallSchema } from "./schemas.js";
 import { apiCall } from "../utils/http.js";
-import { getActiveAgent, markBoardPosted } from "../config/store.js";
+import {
+  getActiveAgent,
+  markBoardPosted,
+  savePendingClaim,
+  loadPendingClaim,
+  clearPendingClaim,
+} from "../config/store.js";
 
 const DEBUG = !!process.env.ASTRA_DEBUG;
 function debugLog(msg: string): void {
@@ -106,15 +112,67 @@ export const apiCallTool = tool({
       || !noRetryPaths.some((p) => path.startsWith(p));
     const retryOpts = isRetryable ? {} : false as const;
 
+    const isClaimPath = method === "POST" && path.startsWith("/api/v1/agents/me/rewards/claim");
     const result = await apiCall(method, path, resolvedBody, agentName ?? undefined, retryOpts);
 
     if (!result.ok) {
+      // ── 409 on claim: try to recover cached blob ──
+      if (isClaimPath && result.status === 409 && agentName) {
+        const cached = loadPendingClaim(agentName);
+        if (cached) {
+          const now = Date.now();
+          const expires = new Date(cached.expiresAt).getTime();
+          const isFresh = expires > now + 60_000; // 1-min safety buffer
+
+          if (isFresh && cached.retryCount < 3) {
+            cached.retryCount++;
+            savePendingClaim(agentName, cached);
+            debugLog(`api_call: recovered cached claim blob (retry #${cached.retryCount})`);
+            return {
+              success: true,
+              transaction: cached.transaction,
+              expiresAt: cached.expiresAt,
+              _recovered: true,
+              message: `Recovered pending claim from cache (attempt ${cached.retryCount}/3). Proceed to sign and submit.`,
+            };
+          }
+
+          // Expired or too many retries — clear and give actionable error
+          clearPendingClaim(agentName);
+          if (!isFresh) {
+            return {
+              error: "The previous pending claim has expired.",
+              hint: "Request a fresh claim — the expired one has been cleared.",
+            };
+          }
+          return {
+            error: "Claim has failed 3 times with the same transaction blob.",
+            hint: "Ask the user what they'd like to do. The pending claim has been cleared so a fresh one can be requested.",
+          };
+        }
+      }
+
       return {
         error: result.error,
         status: result.status,
         code: result.code,
         hint: result.hint,
       };
+    }
+
+    // ── Cache blob on successful claim ──
+    if (isClaimPath && agentName) {
+      const data = result.data as Record<string, unknown>;
+      if (data.transaction && data.expiresAt) {
+        savePendingClaim(agentName, {
+          seasonId: (resolvedBody?.seasonId as string) ?? "",
+          transaction: data.transaction as string,
+          expiresAt: data.expiresAt as string,
+          cachedAt: new Date().toISOString(),
+          retryCount: 0,
+        });
+        debugLog("api_call: cached claim blob for retry recovery");
+      }
     }
 
     // Auto-track board post flag
