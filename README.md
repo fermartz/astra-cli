@@ -195,7 +195,6 @@ node dist/astra.js
 - [x] Audit logging
 - [x] Context compaction (summarize long conversations)
 - [x] Pending claim recovery (resilient reward claiming)
-- [ ] Trade approval gate (confirm before executing trades)
 - [ ] Market heartbeat (proactive price notifications)
 - [ ] OpenAI API, Gemini, Ollama providers
 - [ ] Provider switching mid-session
