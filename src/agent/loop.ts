@@ -307,7 +307,13 @@ async function runCodexTurn(
     }
 
     debugLog(`Codex loop done after ${steps} steps, totalText=${accumulatedText.length}chars`);
-    const text = accumulatedText || "(No text response)";
+    let text = accumulatedText;
+    if (!text && steps > 0) {
+      // LLM executed tools but returned no text — provide fallback so user isn't left with silence
+      text = "I ran the requested action but the model returned no summary. Please try asking again.";
+    } else if (!text) {
+      text = "(No response from model)";
+    }
 
     // Add final text-only assistant message
     responseMessages.push({ role: "assistant", content: text });

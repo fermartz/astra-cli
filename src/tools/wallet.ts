@@ -87,15 +87,25 @@ export const signChallengeTool = tool({
       const signature = nacl.sign.detached(messageBytes, secretKeyBytes);
       const signatureBase58 = bs58.encode(signature);
 
-      // Extract nonce from challenge string: "AstraNova wallet verification: <nonce>"
-      const nonceMatch = /AstraNova wallet verification:\s*(.+)$/.exec(challenge);
-      const nonce = nonceMatch?.[1]?.trim() ?? "";
+      // Extract nonce from challenge string
+      // Format 1: "AstraNova wallet verification: <nonce>"
+      // Format 2: multiline challenge where nonce is on its own line or after a colon
+      let nonce = "";
+      const singleLineMatch = /(?:verification|nonce)[:\s]+([a-zA-Z0-9_-]+)\s*$/m.exec(challenge);
+      if (singleLineMatch) {
+        nonce = singleLineMatch[1].trim();
+      } else {
+        // Fallback: last word/token in the challenge (often the nonce)
+        const tokens = challenge.trim().split(/\s+/);
+        nonce = tokens[tokens.length - 1] ?? "";
+      }
 
       return {
         success: true,
         signature: signatureBase58,
         walletAddress: wallet.publicKey,
         nonce,
+        challengeRaw: challenge,
         message: `Challenge signed. Now call PUT /api/v1/agents/me/wallet with {"walletAddress":"${wallet.publicKey}","signature":"${signatureBase58}","nonce":"${nonce}"}`,
       };
     } catch (error: unknown) {

@@ -54,13 +54,13 @@
 - `12-session-persistence` — Session with tool calls, multi-step trade flow, pruning
 - `13-codex-body-formats` — All 4 Codex body format variations with real API
 
-## What's NOT Done / Next Steps
+## TODO
 
 1. **Run integration tests** — `pnpm vitest run src/__tests__/integration/` — review results together
-2. **Codex native end-to-end validation** — Actually run the CLI with Codex OAuth to verify the 3 fixes work through the full pipeline
-3. **Twitter/X verification** — Cannot be automated (needs real tweet URLs)
+2. **Codex native end-to-end validation** — Run the CLI with Codex OAuth to verify all fixes work through the full pipeline
+3. **Retry with backoff for transient failures** — Network drops, 429 rate limits, 5xx errors, OAuth token expiry mid-session. Currently these bubble up as errors with no retry. Add automatic retry (2-3 attempts with exponential backoff) before surfacing to the user. Also handle OAuth token auto-refresh on 401.
 4. **Continue IMPROVEMENTS-PLAN.md** — Stopped at #4 (Context Compaction)
-5. **Codex handoff mode** — Removed entirely (was deprioritized, code deleted)
+5. **Twitter/X verification** — Cannot be automated (needs real tweet URLs)
 
 ## Key Files Modified Today
 - `src/agent/loop.ts` — 3 major fixes (conversation history, response messages, debug logging)

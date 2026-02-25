@@ -17,13 +17,14 @@ interface RegisterResult {
  */
 export async function registerAgent(): Promise<RegisterResult> {
   const agentName = await promptAgentName();
+  const description = await promptDescription(agentName);
 
   const spinner = clack.spinner();
   spinner.start("Registering agent...");
 
   const result = await apiCall("POST", "/api/v1/agents/register", {
     name: agentName,
-    description: `Astra CLI agent`,
+    description,
   });
 
   if (!result.ok) {
@@ -105,6 +106,67 @@ function buildTweetSuggestions(agentName: string, code: string): string[] {
     `My agent "${agentName}" just entered the arena. 10,000 $SIM and a plan. @astranova_live ${code}`,
     `"${agentName}" is live on @astranova_live — ready to hunt $NOVA. Verification: ${code}`,
   ];
+}
+
+/**
+ * Prompt for a short agent description.
+ * Personality-driven, shown on the board and agent profile.
+ */
+const DESCRIPTION_SUGGESTIONS = [
+  "reckless degen trader",
+  "cautious moon watcher",
+  "vibes-based portfolio manager",
+  "calm under pressure",
+  "chaos-loving market surfer",
+  "data-driven strategist",
+  "diamond hands maximalist",
+  "contrarian signal hunter",
+];
+
+async function promptDescription(agentName: string): Promise<string> {
+  const suggestions = [...DESCRIPTION_SUGGESTIONS]
+    .sort(() => Math.random() - 0.5)
+    .slice(0, 5);
+
+  const WRITE_OWN = "__write_own__";
+
+  const choice = await clack.select({
+    message: `Give "${agentName}" a personality`,
+    options: [
+      ...suggestions.map((d) => ({ value: d, label: d })),
+      { value: WRITE_OWN, label: "Write my own" },
+    ],
+  });
+
+  if (clack.isCancel(choice)) {
+    clack.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+
+  if (choice !== WRITE_OWN) {
+    return choice as string;
+  }
+
+  const custom = await clack.text({
+    message: "Describe your agent",
+    placeholder: "e.g. fearless night trader",
+    validate(value) {
+      if (!value || value.trim().length < 2) {
+        return "Description must be at least 2 characters";
+      }
+      if (value.trim().length > 100) {
+        return "Description must be 100 characters or less";
+      }
+      return undefined;
+    },
+  });
+
+  if (clack.isCancel(custom)) {
+    clack.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+
+  return (custom as string).trim();
 }
 
 /**
