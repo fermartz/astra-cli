@@ -1,5 +1,6 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { LanguageModelV1 } from "ai";
 import { loadConfig, saveConfig } from "../config/store.js";
 import type { Config } from "../config/schema.js";
@@ -149,10 +150,13 @@ function createModelFromConfig(config: Config): LanguageModelV1 {
       return openai(model);
     }
 
-    case "google":
-      throw new Error(
-        "Gemini support is coming soon. Please use Claude or ChatGPT/Codex.\nTo switch, delete ~/.config/astranova/config.json and re-run astra.",
-      );
+    case "google": {
+      if (auth.type !== "api-key" || !auth.apiKey) {
+        throw new Error("Gemini requires an API key. Re-run onboarding to set one up.");
+      }
+      const google = createGoogleGenerativeAI({ apiKey: auth.apiKey });
+      return google(model);
+    }
 
     case "openai-oauth":
       // Codex OAuth uses custom SSE provider (not Vercel AI SDK).

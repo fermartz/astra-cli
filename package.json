@@ -21,6 +21,8 @@
     "start:debug": "node dist/astra.js --debug 2>debug.log",
     "start:gpt": "ASTRA_PROVIDER=openai ASTRA_MODEL=gpt-4o-mini node dist/astra.js",
     "start:gpt:debug": "ASTRA_PROVIDER=openai ASTRA_MODEL=gpt-4o-mini node dist/astra.js --debug 2>debug.log",
+    "start:claude:debug": "ASTRA_PROVIDER=claude ASTRA_MODEL=claude-haiku-4-5-20251001 node dist/astra.js --debug 2>debug.log",
+    "start:gemini:debug": "ASTRA_PROVIDER=google ASTRA_MODEL=gemini-2.5-flash node dist/astra.js --debug 2>debug.log",
     "dev": "tsup --watch",
     "build": "tsup",
     "lint": "eslint src/",

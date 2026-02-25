@@ -22,7 +22,7 @@ const DEFAULT_MODELS: Record<string, string> = {
   "openai-oauth": "gpt-5.3-codex",
   claude: "claude-sonnet-4-20250514",
   openai: "gpt-4o-mini",
-  google: "gemini-2.0-flash",
+  google: "gemini-2.5-flash",
   ollama: "llama3.1",
 };
 
@@ -53,7 +53,7 @@ export async function selectProvider(): Promise<ProviderChoice> {
         {
           value: "google",
           label: "Gemini (Google)",
-          hint: "coming soon",
+          hint: "API key",
         },
         {
           value: "ollama",
@@ -68,10 +68,9 @@ export async function selectProvider(): Promise<ProviderChoice> {
       process.exit(0);
     }
 
-    // Gemini, Ollama deferred
-    if (provider === "google" || provider === "ollama") {
-      const names: Record<string, string> = { google: "Gemini", ollama: "Ollama" };
-      clack.log.warn(`${names[provider as string]} support is coming soon. Please choose another provider for now.`);
+    // Ollama deferred
+    if (provider === "ollama") {
+      clack.log.warn("Ollama support is coming soon. Please choose another provider for now.");
       continue;
     }
 
