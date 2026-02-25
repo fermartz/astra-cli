@@ -9,10 +9,11 @@
 - User tested it, didn't like the Codex CLI experience
 - **Decision: Focus on fixing native Codex SSE provider instead** since many users have ChatGPT subscriptions
 
-### 2. Three Bug Fixes to Codex Native Path (in `src/agent/loop.ts`)
+### 2. Four Bug Fixes to Codex Native Path (in `src/agent/loop.ts`)
 - **Fix 1 — Conversation history loss**: Codex input was filtering out tool messages. Now converts CoreMessage tool-call/tool-result parts to CodexInputItem function_call/function_call_output items so conversation context is preserved across turns.
 - **Fix 2 — Response messages flat**: Session persistence was broken for Codex path because response messages were flat text instead of structured CoreMessage[]. Now builds assistant messages with tool-call content parts + tool messages with tool-result content parts, matching the SDK path format.
 - **Fix 3 — Debug logging noise**: Replaced raw `process.stderr.write` calls with `debugLog()` gated behind `ASTRA_DEBUG` env var in both `loop.ts` and `src/tools/api.ts`.
+- **Fix 4 — Dual ID mismatch on multi-turn tool calls**: Codex API requires `function_call` items to have an `id` starting with `fc_`, but CoreMessage only stores one `toolCallId` (the `call_` variant). On second+ turns, reconstructing history put `call_...` in the `id` field causing `Invalid 'input[1].id': Expected an ID that begins with 'fc'`. Fixed by generating `fc_<callId>` prefix when reconstructing from history.
 
 ### 3. Path Testability Refactor (`src/config/paths.ts`)
 - Refactored from static constants to dynamic `_root()` function
@@ -59,7 +60,7 @@
 2. **Codex native end-to-end validation** — Actually run the CLI with Codex OAuth to verify the 3 fixes work through the full pipeline
 3. **Twitter/X verification** — Cannot be automated (needs real tweet URLs)
 4. **Continue IMPROVEMENTS-PLAN.md** — Stopped at #4 (Context Compaction)
-5. **Codex handoff mode** — Created but deprioritized. Files exist, can be enabled with `"codexMode": "handoff"` in config
+5. **Codex handoff mode** — Removed entirely (was deprioritized, code deleted)
 
 ## Key Files Modified Today
 - `src/agent/loop.ts` — 3 major fixes (conversation history, response messages, debug logging)
@@ -67,11 +68,7 @@
 - `src/config/paths.ts` — Dynamic root resolution for testability
 - `src/config/store.ts` — Updated to use dynamic paths
 - `src/remote/cache.ts` — Updated to use dynamic paths
-- `src/config/schema.ts` — Added codexMode field
-- `src/bin/astra.ts` — Added handoff branch
-- `src/drivers/codex-handoff.ts` — New file (handoff driver)
 - `src/config/index.ts` — Added getRoot export
 
-## Git Status (Uncommitted)
-- Modified: `src/tools/api.ts`, `src/tools/schemas.ts`
-- Plus all the new test files and fixes above (check `git status` for full list)
+## Git Status
+All committed and pushed to main.
