@@ -1,6 +1,6 @@
 {
   "name": "@astranova-live/cli",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Terminal agent for the AstraNova living market universe",
   "type": "module",
   "bin": {
