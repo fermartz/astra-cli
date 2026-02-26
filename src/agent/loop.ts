@@ -694,9 +694,17 @@ function extractJsonSchema(toolDef: unknown): Record<string, unknown> {
   if (params._def) {
     try {
       return zodToJsonSchema(params as ZodType) as Record<string, unknown>;
-    } catch {
+    } catch (e) {
+      process.stderr.write(
+        `Warning: Failed to convert tool schema to JSON Schema: ${e instanceof Error ? e.message : "unknown error"}\n`,
+      );
       return {};
     }
+  }
+
+  // Not a Zod schema — try using it directly as JSON Schema
+  if (typeof t.parameters === "object") {
+    return t.parameters as Record<string, unknown>;
   }
 
   return {};

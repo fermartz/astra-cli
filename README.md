@@ -1,15 +1,22 @@
 # Astra CLI
 
 ```
-         __
- _(\    |@@|
-(__/\__ \--/ __
-   \___|----|  |   __
-       \ /\ /\ )_ / _\
-       /\__/\ \__O (__
-      (--/\--)    \__/
-      _)(  )(_
-     `---''---`
+        _..._
+      .'     '.      _
+     /    .-""-\   _/ \
+   .-|   /:.   |  |   |
+   |  \  |:.   /.-'-./
+   | .-'-;:__.'    =/
+   .'=  *=|ASTRA _.='
+  /   _.  |    ;
+ ;-.-'|    \   |
+/   | \    _\  _\
+\__/'._;.  ==' ==\
+         \    \   |
+         /    /   /
+         /-._/-._/
+         \   `\  \
+          `-._/._/
       _    ____ _____ ____      _    _   _  _____     ___
      / \  / ___|_   _|  _ \    / \  | \ | |/ _ \ \   / / \
     / _ \ \___ \ | | | |_) |  / _ \ |  \| | | | \ \ / / _ \
@@ -31,10 +38,10 @@ Astra CLI is the open-source terminal client. It connects your chosen LLM to the
 
 ```bash
 # Run directly (no install)
-npx @astra/cli
+npx @astranova-live/cli
 
 # Or install globally
-npm i -g @astra/cli
+npm i -g @astranova-live/cli
 astra
 
 # Resume your last session
@@ -62,8 +69,8 @@ On first run, the onboarding wizard walks you through:
 |----------|------|--------|
 | **Claude** (Anthropic) | API key | Available |
 | **ChatGPT / Codex** | OAuth (PKCE) | Available |
-| **GPT** (OpenAI API) | API key | Coming soon |
-| **Gemini** (Google) | API key | Coming soon |
+| **GPT** (OpenAI API) | API key | Available |
+| **Gemini** (Google) | API key | Available |
 | **Ollama** (local) | None | Coming soon |
 
 ## Features
@@ -85,6 +92,8 @@ On first run, the onboarding wizard walks you through:
 - **API paths are restricted** — the LLM can only call `/api/v1/*` and `/health` on the AstraNova API.
 - **Audit logging** — every tool call is logged with sanitized args (secrets redacted).
 - **No shell execution** — the agent has a fixed set of tools, no arbitrary command access.
+
+> **Local key storage:** Your Solana private key and API tokens are stored in `~/.config/astranova/` as plain text, protected by file permissions (`chmod 600`). This is the same approach used by Solana CLI (`~/.config/solana/id.json`), SSH (`~/.ssh/`), and most CLI wallets. It means anyone with access to your user account can read these files. **You are responsible for protecting your machine** — use disk encryption, a strong login password, and keep backups of your wallet in a secure location. Astra CLI never sends your private key to any server or LLM.
 
 ## Local Data
 
@@ -136,6 +145,19 @@ The LLM has access to these tools (no shell execution, no arbitrary file access)
 | `/help` | Show available commands |
 | `/exit` | Exit (also `/quit`, `/q`) |
 | `/clear` | Clear chat display |
+
+## Environment Overrides
+
+For debugging and testing — not required for normal use. These override `config.json` for a single run.
+
+```bash
+ASTRA_DEBUG=1 astra                          # Print debug logs to stderr
+ASTRA_PROVIDER=claude astra                  # Use a different provider
+ASTRA_MODEL=claude-haiku-4-5-20251001 astra  # Use a different model
+ASTRA_API_KEY=sk-... astra                   # Use a different API key
+```
+
+`ASTRA_PROVIDER` and `ASTRA_API_KEY` must be set together. Useful for testing a provider without re-running onboarding.
 
 ## Development
 
@@ -196,7 +218,8 @@ node dist/astra.js
 - [x] Context compaction (summarize long conversations)
 - [x] Pending claim recovery (resilient reward claiming)
 - [ ] Market heartbeat (proactive price notifications)
-- [ ] OpenAI API, Gemini, Ollama providers
+- [x] OpenAI API and Gemini providers
+- [ ] Ollama (local models)
 - [ ] Provider switching mid-session
 
 ## License

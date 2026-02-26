@@ -55,8 +55,7 @@ export async function getCodexAccessToken(): Promise<string> {
     throw new Error("Codex OAuth not configured. Re-run onboarding.");
   }
 
-  await ensureFreshToken(config);
-  return config.auth.oauth.accessToken;
+  return ensureFreshToken(config);
 }
 
 /**
@@ -100,13 +99,14 @@ export async function getModel(): Promise<LanguageModelV1> {
 
 /**
  * Check if the OAuth token is expired and refresh it if needed.
- * Updates config.json with the new tokens.
+ * Saves updated tokens to config.json without mutating the input object.
+ * Returns the current (or refreshed) access token.
  */
-async function ensureFreshToken(config: Config): Promise<void> {
+async function ensureFreshToken(config: Config): Promise<string> {
   const oauth = config.auth.oauth;
-  if (!oauth) return;
+  if (!oauth) throw new Error("OAuth config missing");
 
-  if (!isTokenExpired(oauth.expiresAt)) return;
+  if (!isTokenExpired(oauth.expiresAt)) return oauth.accessToken;
 
   try {
     const tokens = await refreshTokens({
@@ -114,14 +114,22 @@ async function ensureFreshToken(config: Config): Promise<void> {
       clientId: oauth.clientId,
     });
 
-    // Update config with new tokens
-    config.auth.oauth = {
-      ...oauth,
-      accessToken: tokens.accessToken,
-      refreshToken: tokens.refreshToken,
-      expiresAt: tokens.expiresAt,
+    // Save updated tokens without mutating the input config
+    const updatedConfig: Config = {
+      ...config,
+      auth: {
+        ...config.auth,
+        oauth: {
+          ...oauth,
+          accessToken: tokens.accessToken,
+          refreshToken: tokens.refreshToken,
+          expiresAt: tokens.expiresAt,
+        },
+      },
     };
-    saveConfig(config);
+    saveConfig(updatedConfig);
+
+    return tokens.accessToken;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
     throw new Error(

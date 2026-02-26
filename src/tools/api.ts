@@ -137,7 +137,7 @@ export const apiCallTool = tool({
         if (cached) {
           const now = Date.now();
           const expires = new Date(cached.expiresAt).getTime();
-          const isFresh = expires > now + 60_000; // 1-min safety buffer
+          const isFresh = expires > now + 120_000; // 2-min safety buffer
 
           if (isFresh && cached.retryCount < 3) {
             cached.retryCount++;

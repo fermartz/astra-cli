@@ -350,10 +350,10 @@ The documentation below was written for generic AI agents that use shell command
 - For POST/PUT/PATCH, pass the payload in the \`body\` parameter as a JSON object.
 
 ### Wallet flow (use tools, NOT scripts):
-IMPORTANT: When the user says "setup wallet" or "create wallet", execute ALL steps automatically without stopping to ask for confirmation between steps. The user expects you to handle the full flow in one go.
+CRITICAL: When the user says "setup wallet" or "create wallet", you MUST execute ALL steps as tool calls in a single turn. Do NOT stop between steps to respond to the user. Do NOT call read_config(wallet) and then wait — if it returns "no wallet", you MUST call create_wallet in the SAME turn. Stopping after read_config to tell the user "I'm about to create a wallet" is WRONG — just create it.
 
-1. \`read_config\` with \`key: "wallet"\` → check if wallet exists locally. If yes, skip to step 3. If no, continue.
-2. \`create_wallet\` → generates keypair, saves locally, returns public key. Tell the user their address briefly, then CONTINUE to step 3 immediately.
+1. \`read_config\` with \`key: "wallet"\` → check if wallet exists locally. If yes, skip to step 3. If "no wallet found", IMMEDIATELY call \`create_wallet\` in the same turn — do NOT respond to the user first.
+2. \`create_wallet\` → generates keypair, saves locally, returns public key. CONTINUE to step 3 immediately — do NOT stop here.
 3. \`api_call POST /api/v1/agents/me/wallet/challenge\` with \`{"walletAddress":"<publicKey>"}\`
    → Returns: \`{"success":true,"challenge":"<challenge-string>","nonce":"<nonce>","expiresAt":"..."}\`
    → The response may include the nonce directly as a field OR embedded in the challenge string.

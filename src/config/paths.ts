@@ -45,7 +45,12 @@ export function statePath(): string {
 
 /** Path to a specific agent's directory. */
 export function agentDir(agentName: string): string {
-  return path.join(_root(), "agents", agentName);
+  const agentsRoot = path.join(_root(), "agents");
+  const resolved = path.resolve(agentsRoot, agentName);
+  if (!resolved.startsWith(agentsRoot + path.sep)) {
+    throw new Error("Invalid agent name");
+  }
+  return resolved;
 }
 
 /** Path to an agent's credentials file. */

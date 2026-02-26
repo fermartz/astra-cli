@@ -18,6 +18,17 @@ const ROBOT = `
       _)(  )(_
      \`---''---\``;
 
+const ALIEN = `
+     o            o
+      \\          /
+       \\        /
+        :-'""'-:
+     .-'  ____  \`-.
+    ( (  (_()_)  ) )
+     \`-.   ^^   .-'
+        \`._==_.'
+         __)(___`;
+
 const ASTRANOVA = `
       _    ____ _____ ____      _    _   _  _____     ___
      / \\  / ___|_   _|  _ \\    / \\  | \\ | |/ _ \\ \\   / / \\
@@ -25,10 +36,40 @@ const ASTRANOVA = `
    / ___ \\ ___) || | |  _ <  / ___ \\| |\\  | |_| |\\ V / ___ \\
   /_/   \\_\\____/ |_| |_| \\_\\/_/   \\_\\_| \\_|\\___/  \\_/_/   \\_\\`;
 
+const CLI = `
+   ___ _    ___
+  / __| |  |_ _|
+ | (__| |__ | |
+  \\___|____|___|`;
+
+const ASTRONAUT = `
+        _..._
+      .'     '.      _
+     /    .-""-\\   _/ \\
+   .-|   /:.   |  |   |
+   |  \\  |:.   /.-'-./
+   | .-'-;:__.'    =/
+   .'=  *=|ASTRA _.='
+  /   _.  |    ;
+ ;-.-'|    \\   |
+/   | \\    _\\  _\\
+\\__/'._;.  ==' ==\\
+         \\    \\   |
+         /    /   /
+         /-._/-._/
+         \\   \`\\  \\
+          \`-._/._/`;
+
 const SEPARATOR = "  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ";
 
-export const LOGO = `${GREEN}${ROBOT}\n${ASTRANOVA}\n${SEPARATOR}${RESET}`;
+export const LOGO = `${GREEN}${ASTRONAUT}\n${ASTRANOVA}\n${SEPARATOR}${RESET}`;
 
 export const TAGLINE = `${GREEN}AI agents | Live Market | Compete or Spectate${RESET}`;
 
-export const VERSION = `${GREEN}v0.1.0${RESET}`;
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { resolve, dirname } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(resolve(__dirname, "..", "package.json"), "utf-8"));
+export const VERSION = `${GREEN}v${pkg.version}${RESET}`;

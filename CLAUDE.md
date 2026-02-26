@@ -117,9 +117,11 @@ Matches the AstraNova API convention (`skill.md` is the source of truth for path
 ## Distribution
 
 ```bash
-npx @astra/cli        # One-shot run
-npm i -g @astra/cli   # Global install → `astra` command
+npx --package @astranova-live/cli astra   # One-shot run
+npm i -g @astranova-live/cli              # Global install → `astra` command
 ```
+
+Published as `@astranova-live/cli` on npm (current: v0.1.6). The `bin/astra.js` wrapper requires `chmod +x` for npm 11 compatibility.
 
 ## Progress Tracker
 
@@ -156,7 +158,15 @@ npm i -g @astra/cli   # Global install → `astra` command
 - `clearPendingClaim` called on successful claim in wallet.ts
 - Store functions in `src/config/store.ts`: `savePendingClaim`, `loadPendingClaim`, `clearPendingClaim`
 
-**Pre-Publish Provider Cleanup:** OpenAI API, Gemini, and Ollama marked as "coming soon" in onboarding and provider factory. Only Claude and Codex OAuth ship as active providers. SDK imports for disabled providers removed.
+**All Four Providers Active:** Codex OAuth, OpenAI API key, Claude, and Gemini are all wired up and working. Only Ollama remains "coming soon".
+- OpenAI API key path uses shared `runResponsesApiTurn()` (same SSE code as Codex, different base URL)
+- Claude and Gemini use Vercel AI SDK `streamText()` path
+- Provider routing: `isCodexOAuth()` → Codex turn, `isOpenAIResponses()` → OpenAI Responses turn, else → SDK turn
+- Env overrides: `ASTRA_PROVIDER`, `ASTRA_MODEL`, `ASTRA_API_KEY` for testing without changing config
+
+**SDK Idle Timeout:** 30s idle timeout on the Vercel AI SDK path (`IDLE_TIMEOUT_MS`). If no data (text chunks, tool step completions) arrives within 30s, the stream is aborted via `Promise.race` against an abort promise. Prevents the TUI from hanging forever on unresponsive providers (observed with Gemini). Overall timeout remains at 3 minutes (`TURN_TIMEOUT_MS`, configurable via `ASTRA_TIMEOUT` env var).
+
+**GET Body Fix:** LLMs (especially Gemini) sometimes pass `body` params on GET requests. Node's `fetch` throws on GET with body. Fixed in `src/tools/api.ts` — converts GET body to query string params. Safety net in `src/utils/http.ts` silently drops body on GET.
 
 **Resilient Retry:** Two-layer safety net for empty/broken LLM responses (commit `fb7555e`):
 - Layer 1 (Codex-specific): nudges LLM for summary when tools ran but no text returned
@@ -168,13 +178,17 @@ npm i -g @astra/cli   # Global install → `astra` command
 
 **Test gap:** `callCodex`, `callCodexWithRetry`, `parseSSEStream` have no unit tests.
 
+**Monorepo Migration:** Plan written to `docs/MONOREPO-MIGRATION.md` (gitignored, local only). Three packages: `@astranova-live/tools` (shared tool logic, config, solana, http), `@astranova-live/cli` (TUI + agent loop), `@astranova-live/mcp` (MCP server for Claude Desktop). Tools package has zero dependency on Vercel AI SDK or Ink.
+
+**Driver Library Plan:** Architecture doc at `docs/LLM-DRIVER-LIBRARY.md` (gitignored, local only). Standalone driver library (`src/drivers/`) to replace Vercel AI SDK with direct HTTP/SSE for all providers. Gives every provider the same resilience (retry, timeout, idle detection). Not yet implemented.
+
 ## Future Improvements
 
 ### Tool Execution Approval
 Add a confirmation step before sensitive tool calls (trades, wallet signing, transaction sending). The LLM should preview the action and wait for user approval before executing. Inspired by Codex CLI's `-a on-request` pattern. Non-sensitive reads (market state, portfolio, agent status) should remain instant.
 
-### Driver Pattern for Providers
-Refactor provider-specific logic from inline `loop.ts` conditionals into separate driver modules (`src/agent/drivers/codex.ts`, `src/agent/drivers/sdk.ts`). Each driver owns its own API interaction, message formatting, and tool schema conversion. Makes adding new providers (Ollama, future APIs) cleaner and more testable.
+### Driver Library (Planned)
+Replace Vercel AI SDK with standalone driver library. Architecture designed in `docs/LLM-DRIVER-LIBRARY.md`. Each provider gets a `Driver` with `stream()` method, shared `Engine` handles tool loop/retry/compaction. Removes `ai`, `@ai-sdk/*` dependencies. See doc for full plan and migration phases.
 
 ### Sandbox Restrictions for Config Writes
 Limit `write_config` tool to a whitelist of safe keys/files. Prevent the LLM from overwriting sensitive files like `credentials.json` or `wallet.json` through the write_config tool — those should only be written by dedicated onboarding/wallet tools with explicit user consent.

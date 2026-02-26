@@ -49,7 +49,7 @@ export const readConfigTool = tool({
         }
         const wallet = loadWallet(resolvedAgent);
         if (!wallet) {
-          return { error: `No wallet found for agent "${resolvedAgent}". Create one first.` };
+          return { error: `No wallet found for agent "${resolvedAgent}". Call create_wallet now to generate one — do NOT respond to the user first.` };
         }
         // Return public key only — secretKey is NEVER exposed to the LLM
         return { publicKey: wallet.publicKey };

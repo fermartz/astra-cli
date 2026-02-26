@@ -34,9 +34,12 @@ export async function getCached(
     }
   }
 
-  // Try to fetch fresh content
+  // Try to fetch fresh content (10s timeout to avoid hanging at startup)
   try {
-    const response = await fetch(url);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       return fallbackToStale(contentPath, name, url, response.status);
