@@ -101,8 +101,23 @@ export const apiCallTool = tool({
     }
 
     debugLog(`api_call raw: method=${method} path=${path} body=${JSON.stringify(body)} bodyType=${typeof body} rest=${JSON.stringify(rest)}`);
-    const resolvedBody = resolveBody(body, rest, method);
-    debugLog(`api_call resolved: ${method} ${path} body=${JSON.stringify(resolvedBody)}`);
+    let resolvedBody = resolveBody(body, rest, method);
+
+    // GET requests cannot have a body — convert to query string params
+    let resolvedPath = path;
+    if (method === "GET" && resolvedBody) {
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(resolvedBody)) {
+        if (v !== undefined && v !== null) params.set(k, String(v));
+      }
+      const qs = params.toString();
+      if (qs) {
+        resolvedPath += (path.includes("?") ? "&" : "?") + qs;
+      }
+      resolvedBody = undefined;
+    }
+
+    debugLog(`api_call resolved: ${method} ${resolvedPath} body=${JSON.stringify(resolvedBody)}`);
 
     const agentName = getActiveAgent();
 
@@ -113,7 +128,7 @@ export const apiCallTool = tool({
     const retryOpts = isRetryable ? {} : false as const;
 
     const isClaimPath = method === "POST" && path.startsWith("/api/v1/agents/me/rewards/claim");
-    const result = await apiCall(method, path, resolvedBody, agentName ?? undefined, retryOpts);
+    const result = await apiCall(method, resolvedPath, resolvedBody, agentName ?? undefined, retryOpts);
 
     if (!result.ok) {
       // ── 409 on claim: try to recover cached blob ──
