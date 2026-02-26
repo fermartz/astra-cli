@@ -18,6 +18,7 @@ import {
 
 /** Maximum time (ms) for a single agent turn before we abort (SDK path only). */
 const TURN_TIMEOUT_MS = Number(process.env.ASTRA_TIMEOUT) || 180_000; // 3 minutes (configurable via ASTRA_TIMEOUT)
+const IDLE_TIMEOUT_MS = 30_000; // 30s — abort if no data arrives
 
 /** Debug logging — only outputs when ASTRA_DEBUG env var is set. */
 const DEBUG = !!process.env.ASTRA_DEBUG;
@@ -455,10 +456,23 @@ async function runSdkTurn(
   debugLog(`Model ready: ${model.modelId ?? "unknown"} — calling streamText...`);
 
   const abortController = new AbortController();
-  const timeout = setTimeout(() => {
-    debugLog("SDK turn timeout — aborting after 90s");
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let timedOutBy: "overall" | "idle" | undefined;
+
+  const overallTimer = setTimeout(() => {
+    debugLog("SDK turn timeout — aborting after overall timeout");
+    timedOutBy = "overall";
     abortController.abort();
   }, TURN_TIMEOUT_MS);
+
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      debugLog("SDK turn idle timeout — no data for 30s, aborting");
+      timedOutBy = "idle";
+      abortController.abort();
+    }, IDLE_TIMEOUT_MS);
+  };
 
   try {
     const result = streamText({
@@ -470,6 +484,7 @@ async function runSdkTurn(
       temperature: 0.7,
       abortSignal: abortController.signal,
       onStepFinish: ({ toolCalls, toolResults }) => {
+        resetIdleTimer();
         if (toolCalls && toolCalls.length > 0) {
           for (let i = 0; i < toolCalls.length; i++) {
             const tc = toolCalls[i];
@@ -488,32 +503,46 @@ async function runSdkTurn(
       },
     });
 
+    // Create a promise that rejects when abort fires — used to race against SDK calls
+    const abortPromise = new Promise<never>((_, reject) => {
+      abortController.signal.addEventListener("abort", () => {
+        const label = timedOutBy === "idle"
+          ? `No response for ${IDLE_TIMEOUT_MS / 1000}s`
+          : `Response timed out after ${TURN_TIMEOUT_MS / 1000}s`;
+        reject(new Error(`${label}. Please try again.`));
+      });
+    });
+
     debugLog("streamText created — consuming textStream...");
-    for await (const chunk of result.textStream) {
-      callbacks.onTextChunk(chunk);
-    }
+    resetIdleTimer(); // Start idle timer when stream begins
+
+    // Race stream consumption against abort
+    await Promise.race([
+      (async () => {
+        for await (const chunk of result.textStream) {
+          resetIdleTimer();
+          callbacks.onTextChunk(chunk);
+        }
+      })(),
+      abortPromise,
+    ]);
     debugLog("textStream consumed — awaiting response...");
 
-    const response = await result.response;
-    const text = await result.text;
-    debugLog(`SDK turn done — text=${text.length}chars, messages=${response.messages.length}`);
+    const response = await Promise.race([result.response, abortPromise]);
+    const text = await Promise.race([result.text, abortPromise]);
+    debugLog(`SDK turn done — text=${(text as string).length}chars, messages=${response.messages.length}`);
 
     return {
-      text: text || "(No response from LLM)",
+      text: (text as string) || "(No response from LLM)",
       responseMessages: response.messages as CoreMessage[],
     };
   } catch (error: unknown) {
-    clearTimeout(timeout);
-
-    if (abortController.signal.aborted) {
-      throw new Error(`Response timed out after ${TURN_TIMEOUT_MS / 1000}s. Please try again.`);
-    }
-
     const message = error instanceof Error ? error.message : String(error);
-    debugLog(`Agent loop error: ${message}`);
+    debugLog(`SDK turn error: ${message}`);
     throw error;
   } finally {
-    clearTimeout(timeout);
+    clearTimeout(overallTimer);
+    if (idleTimer) clearTimeout(idleTimer);
   }
 }
 
