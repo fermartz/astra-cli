@@ -3,7 +3,6 @@ import {
   Keypair,
   Connection,
   VersionedTransaction,
-  clusterApiUrl,
 } from "@solana/web3.js";
 import nacl from "tweetnacl";
 import bs58 from "bs58";
@@ -19,8 +18,7 @@ import {
   clearPendingClaim,
 } from "../config/store.js";
 
-// Default to devnet — can be overridden via config in the future
-const SOLANA_RPC = clusterApiUrl("devnet");
+const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
 
 /**
  * create_wallet tool — generates a new Solana keypair and saves it locally.
@@ -186,6 +184,15 @@ export const signAndSendTransactionTool = tool({
       };
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Unknown error";
+      const isInsufficientFunds =
+        message.includes("Insufficient funds") ||
+        message.includes("insufficient lamports") ||
+        message.includes("no record of a prior credit");
+      if (isInsufficientFunds) {
+        return {
+          error: `Wallet has no SOL for transaction fees. Send at least 0.002 SOL to ${wallet.publicKey} (first claim creates a token account — after that fees are ~0.000005 SOL). Once funded, try claiming again.`,
+        };
+      }
       return { error: `Transaction failed: ${message}` };
     }
   },
