@@ -34,45 +34,45 @@ All notable changes to Astra CLI are documented here.
 - Switch default Solana RPC to mainnet
 - Add helpful error message when wallet has insufficient SOL for transaction fees
 
-## [0.2.1] — 2026-02-20
+## [0.2.1] — 2026-02-26
 
 - Production readiness audit
 - Harden incomplete LLM response detection and recovery
 
-## [0.2.0] — 2026-02-18
+## [0.2.0] — 2026-02-26
 
 - Modular skill file support (ONBOARDING, TRADING, WALLET, REWARDS, API modules)
 - Agent journey stages: `fresh` → `pending` → `verified` → `trading` → `wallet_ready` → `full`
 - Multi-agent support: create, switch, and list agents within one CLI session
 - Session restart on agent switch/create
 
-## [0.1.6] — 2025-06-12
+## [0.1.6] — 2026-02-25
 
 - Add 30s idle timeout to Vercel AI SDK provider path (prevents TUI hanging on unresponsive providers)
 
-## [0.1.5] — 2025-06-11
+## [0.1.5] — 2026-02-25
 
 - Fix GET requests with body crashing fetch (Gemini sends `body` on GET — now converted to query params)
 
-## [0.1.4] — 2025-06-10
+## [0.1.4] — 2026-02-25
 
 - Enable Gemini provider (`gemini-2.5-flash` default)
 - Add OpenAI Responses API path (API key + Codex OAuth both use same SSE engine)
 - Add debug tooling (`ASTRA_DEBUG=1`, `--debug` flag, debug dev scripts)
 - npm publish setup (`@astranova-live/cli`)
 
-## [0.1.3] — 2025-06-09
+## [0.1.3] — 2026-02-25
 
 - Move status bar to footer with always-on spinner
 - Add `/help` info section in TUI
 - Fix status bar ghost borders and improve wallet setup flow
 
-## [0.1.2] — 2025-06-08
+## [0.1.2] — 2026-02-25
 
 - Add pending claim blob cache for resilient reward claiming (interrupted claims retry on next session)
 - Add responsive bordered boxes to TUI components (portfolio card, rewards card)
 
-## [0.1.1] — 2025-06-07
+## [0.1.1] — 2026-02-25
 
 - Context compaction — long conversations automatically summarized to stay within LLM limits
 - Codex provider hardening (response.failed/incomplete handling, stale token fix, idle timeout, retry on 429/5xx)
@@ -82,7 +82,7 @@ All notable changes to Astra CLI are documented here.
 - Audit logging — every tool call logged locally with secrets redacted
 - Retry with exponential backoff for transient API failures
 
-## [0.1.0] — 2025-06-05
+## [0.1.0] — 2026-02-24
 
 - Initial release
 - Multi-provider LLM support (Claude, ChatGPT/Codex OAuth)
