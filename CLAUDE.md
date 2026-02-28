@@ -265,7 +265,7 @@ npx --package @astranova-live/cli astra   # One-shot run
 npm i -g @astranova-live/cli              # Global install → `astra` command
 ```
 
-Published as `@astranova-live/cli` on npm (current: **v0.2.2**). The `bin/astra.js` wrapper requires `chmod +x` for npm 11 compatibility.
+Published as `@astranova-live/cli` on npm (current: **v0.2.5**). The `bin/astra.js` wrapper requires `chmod +x` for npm 11 compatibility.
 
 ## Progress Tracker
 
