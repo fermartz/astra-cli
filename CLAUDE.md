@@ -70,6 +70,39 @@ else                → runSdkTurn()            → Vercel AI SDK streamText()
 - `src/remote/` — Fetch + cache remote context files from `agents.astranova.live` (24h TTL)
 - `src/utils/` — HTTP client with retry (`http.ts`), exponential backoff (`retry.ts`), audit logging (`audit.ts`)
 
+## Planning Protocol
+
+Before writing any code, enter plan mode and complete all four gates in order.
+Do not skip gates or proceed to implementation until all four are documented.
+
+### Gate 1 — Codebase exploration
+Read every file that will be touched or affected. Never plan against assumed code.
+Identify existing patterns to follow. Note what already works and must not break.
+
+### Gate 2 — Risk analysis
+For every proposed change, answer:
+- What existing behavior could this break?
+- Are there race conditions or state conflicts? (e.g. concurrent turns, timer vs user input)
+- What happens in edge cases — network failure, empty state, mid-execution crash?
+- What happens if this fails halfway through?
+
+### Gate 3 — Security analysis
+- Does this introduce new attack surface?
+- Can LLM-controlled inputs influence the new code in unintended ways?
+- Does anything new touch credentials, private keys, or sensitive config?
+- Does any new UI surface expose data it shouldn't?
+- Could a malicious `memory.md`, remote doc, or `CLAUDE.md` change influence this behavior?
+
+### Gate 4 — Simplicity check
+- Is this the minimal change that achieves the goal?
+- What should NOT be built yet?
+- Does anything in this plan belong in a follow-up instead?
+- Am I introducing abstractions for one-time use?
+
+Only call ExitPlanMode after all four gates are documented in the plan file.
+
+---
+
 ## Development Rules
 
 These rules apply to every task. Review them before writing or modifying code.
