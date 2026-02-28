@@ -51,6 +51,9 @@ function detectJourneyStage(params: {
   // Agent is verified/active
   if (apiStatus.simBalance === 10_000 && !hasWallet) return "verified"; // never traded (still at starting balance, no wallet)
   if (!hasWallet) return "trading";
+  // full = wallet registered with API (completed full setup)
+  // wallet_ready = local wallet exists but not yet registered with API
+  if (apiStatus.walletAddress) return "full";
   return "wallet_ready";
 }
 
@@ -160,6 +163,7 @@ async function main(): Promise<void> {
     status: apiStatus?.status ?? (isNewAgent ? "pending_verification" : "active"),
     simBalance: apiStatus?.simBalance,
     walletAddress: apiStatus?.walletAddress,
+    walletLocal: hasWallet,
     verificationCode: onboardingResult?.verificationCode ?? apiStatus?.verificationCode,
     isNewAgent,
     boardPosted,

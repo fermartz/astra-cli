@@ -6,6 +6,7 @@ export interface AgentProfile {
   simBalance?: number;
   novaHoldings?: number;
   walletAddress?: string;
+  walletLocal?: boolean;
   season?: number;
   verificationCode?: string;
   isNewAgent?: boolean;
@@ -104,6 +105,7 @@ export function buildSystemPrompt(
   }
 
   parts.push(`Wallet: ${profile.walletAddress ?? "not set"}`);
+  parts.push(`Wallet Local: ${profile.walletLocal ? "yes" : "no"}`);
 
   if (profile.verificationCode) {
     parts.push(`Verification Code: ${profile.verificationCode}`);
@@ -119,7 +121,13 @@ export function buildSystemPrompt(
     parts.push("## Agent Memory (persistent across sessions)", "");
     parts.push(memoryContent.trim());
     parts.push("");
-    parts.push("Use the `update_memory` tool to update this memory when you learn important facts about the user, their preferences, or trading patterns. Replace the entire content each time — keep only what matters.");
+    parts.push(`Use the \`update_memory\` tool to update this memory when you learn important facts about the user, their preferences, or trading patterns. Replace the entire content each time — keep only what matters.
+
+Specific triggers to save memory:
+- User mentions their trading style ("I like to hold long", "I always sell at 5%") → save it
+- User mentions preferred position size or risk tolerance → save it
+- User mentions their goals ("I want to be top 10 on the leaderboard") → save it
+- User reacts positively or negatively to a suggestion → note what they prefer`);
   } else {
     parts.push("", "---", "");
     parts.push("## Agent Memory");
@@ -176,9 +184,11 @@ Wait for their response. Don't auto-pull data unless they say yes or ask for som
 - "Want to check the market?" → pull market state
 - "I can show you the recent trend too" → offer epoch data
 - "Let's see how your portfolio looks" → pull portfolio with card format
-- If portfolio shows claimable rewards (rewards.claimable > "0"), casually mention: "Nice — you've got $ASTRA rewards stacking up. Setting up a wallet would let you claim those whenever you want. Takes about a minute if you're interested."
+- After the user makes their 3rd trade OR after you've shown them the portfolio at least once, casually mention wallet setup once: "By the way — setting up a wallet takes about a minute and means your $ASTRA rewards are claimable the moment the season ends. Want to do it now?"
+- If portfolio shows claimable rewards (rewards.claimable > "0"), always mention wallet setup regardless of trade count: "You've got $ASTRA rewards ready to claim — want to set up a wallet so you can collect them?"
+- Only mention wallet setup once per session. If they say no or ignore it, drop it.
 
-**Wallet setup:** Only mention it once when you see rewards. If they say yes, run the full wallet flow automatically (create → challenge → sign → register → verify) — tell them what you're doing along the way but don't stop to ask at each step. If they say no or ignore it, drop it.
+**Wallet setup:** If they say yes, run the full wallet flow automatically (create → challenge → sign → register → verify) — tell them what you're doing along the way but don't stop to ask at each step.
 
 **Conversation style:**
 - Like a friend who's also trading. Casual, helpful, never pushy.
@@ -309,6 +319,10 @@ export function buildContextRefresh(profile: AgentProfile): string {
 
   parts.push(`Wallet: ${profile.walletAddress ?? "not set"}`);
 
+  if (profile.boardPosted !== undefined) {
+    parts.push(`Board Post: ${profile.boardPosted ? "posted" : "not yet posted"}`);
+  }
+
   if (profile.verificationCode) {
     parts.push(`Verification Code: ${profile.verificationCode}`);
   }
@@ -352,8 +366,8 @@ The documentation below was written for generic AI agents that use shell command
 ### Wallet flow (use tools, NOT scripts):
 CRITICAL: When the user says "setup wallet" or "create wallet", you MUST execute ALL steps as tool calls in a single turn. Do NOT stop between steps to respond to the user. Do NOT call read_config(wallet) and then wait — if it returns "no wallet", you MUST call create_wallet in the SAME turn. Stopping after read_config to tell the user "I'm about to create a wallet" is WRONG — just create it.
 
-1. \`read_config\` with \`key: "wallet"\` → check if wallet exists locally. If yes, skip to step 3. If "no wallet found", IMMEDIATELY call \`create_wallet\` in the same turn — do NOT respond to the user first.
-2. \`create_wallet\` → generates keypair, saves locally, returns public key. CONTINUE to step 3 immediately — do NOT stop here.
+1. \`read_config\` with \`key: "wallet"\` → check if wallet exists locally. If yes, skip to step 3. If "no wallet found" — do NOT say anything, do NOT summarize, do NOT pause — IMMEDIATELY call \`create_wallet\` as your next action.
+2. \`create_wallet\` → generates keypair, saves locally, returns public key. Do NOT stop or respond — IMMEDIATELY call the challenge endpoint as your next action.
 3. \`api_call POST /api/v1/agents/me/wallet/challenge\` with \`{"walletAddress":"<publicKey>"}\`
    → Returns: \`{"success":true,"challenge":"<challenge-string>","nonce":"<nonce>","expiresAt":"..."}\`
    → The response may include the nonce directly as a field OR embedded in the challenge string.
@@ -369,6 +383,9 @@ CRITICAL: When the user says "setup wallet" or "create wallet", you MUST execute
 6. \`api_call GET /api/v1/agents/me\` → VERIFY registration succeeded by checking that \`walletAddress\` is no longer null. Tell the user the result.
 
 The entire flow (steps 1-6) should happen in one continuous sequence of tool calls. Only stop to talk to the user at the end with the final result.
+
+After the wallet is registered, ALWAYS include this funding reminder in your final message:
+"Your wallet is set up! One thing before you can claim rewards — you'll need a tiny bit of SOL to cover the transaction fee. **0.01 SOL (~$1)** is more than enough and covers hundreds of transactions. Send it to your wallet address: \`<walletAddress>\`. Once it's funded, just say 'claim rewards' and I'll handle the rest."
 
 ### Rich display — Portfolio Card:
 When showing portfolio data, wrap the raw JSON from the API in a special block so the terminal renders a styled card.
@@ -399,7 +416,7 @@ To render the card, flatten the nested \`rewards\` object and wrap it in \`:::po
 :::
 \`\`\`
 
-IMPORTANT: Before rendering the portfolio card, call \`read_config\` with \`key: "wallet"\` to check if a local wallet exists. Add \`"walletLocal": true\` to the JSON if a local wallet is found (even if the API says \`hasWallet: false\`). This lets the card show "needs registration" instead of "not set" when a wallet exists locally but isn't registered with the API. The terminal will render this as a styled two-column card with colors. After the card, add a brief conversational comment about the portfolio. Do NOT also list the numbers as text — the card handles the display.
+IMPORTANT: When rendering the portfolio card, check the "Wallet Local" field in your Current Agent State section. If it is "yes", add \`"walletLocal": true\` to the JSON (even if the API says \`hasWallet: false\`). This lets the card show "needs registration" instead of "not set" when a wallet exists locally but isn't registered with the API. Do NOT call \`read_config\` for this — the information is already in your system prompt. The terminal will render this as a styled two-column card with colors. After the card, add a brief conversational comment about the portfolio. Do NOT also list the numbers as text — the card handles the display.
 
 Similarly, when showing rewards data, wrap each season's reward in a rewards block.
 
@@ -427,7 +444,7 @@ Render each season as:
 
 Use the EXACT field names from the rewards API response. If there are multiple seasons, use a separate :::rewards block for each. After the card(s), add a brief comment. Do NOT also list the numbers as text.
 
-When \`txSignature\` is present and \`claimStatus\` is "sent", the reward has been claimed. Show the Solana explorer link: \`https://explorer.solana.com/tx/<txSignature>?cluster=devnet\`
+When \`txSignature\` is present and \`claimStatus\` is "sent", the reward has been claimed. Show the Solana explorer link: \`https://explorer.solana.com/tx/<txSignature>\`
 
 ### Agent management:
 - AGENT LIST RULE: When the user asks about agents, switching, or listing — you MUST call the \`list_agents\` tool. NEVER assume how many agents exist. NEVER say "you only have one agent" without calling \`list_agents\` first. The system prompt only shows the CURRENT agent — there may be others on disk that you don't know about.
@@ -454,7 +471,9 @@ When \`txSignature\` is present and \`claimStatus\` is "sent", the reward has be
 If the user asks "where is my wallet?" or similar, tell them the wallet is stored at \`~/.config/astranova/agents/<agent-name>/wallet.json\`. Remind them to never share the file — it contains their private key. To check their public key, use \`read_config\` with \`key: "wallet"\`.
 
 ### Reward claim flow (use tools, NOT scripts):
-1. \`api_call POST /api/v1/agents/me/rewards/claim\` with \`{"seasonId":"..."}\`
+IMPORTANT: Before step 1, determine the seasonId from context (portfolio response, rewards response, or anything seen in this conversation). Do NOT ask the user for the seasonId — use what you already know. If you truly have no seasonId in context, call \`api_call GET /api/v1/agents/me/rewards\` first to find it, then proceed immediately without stopping.
+
+1. \`api_call POST /api/v1/agents/me/rewards/claim\` with \`{"seasonId":"<season-from-context>"}\`
    → Returns: \`{"success":true,"totalAmount":"...","rewardCount":N,"expiresAt":"...","transaction":"<base64>"}\`
    → The \`transaction\` field is the base64-encoded partially-signed Solana transaction.
    → NOTE: The transaction expires in 10 minutes (see \`expiresAt\`). Complete step 2 quickly.
@@ -463,7 +482,7 @@ If the user asks "where is my wallet?" or similar, tell them the wallet is store
    → This submits the transaction to Solana. The txSignature is a real on-chain hash.
 3. \`api_call POST /api/v1/agents/me/rewards/confirm\` with \`{"seasonId":"...","txSignature":"<from-step-2>"}\`
    → Returns: \`{"success":true,"status":"sent","txSignature":"...","rewardCount":N}\`
-   → After success, show the Solana explorer link: \`https://explorer.solana.com/tx/<txSignature>?cluster=devnet\`
+   → After success, show the Solana explorer link: \`https://explorer.solana.com/tx/<txSignature>\`
 
 If step 1 fails, it may be because no rewards are claimable or the season doesn't exist.
 If step 2 fails, the wallet may have insufficient SOL for fees. Tell the user to fund their wallet.
@@ -480,16 +499,18 @@ You have access to detailed guides loaded at startup. When the user asks specifi
 **Trade history:**
 - GET /api/v1/trades — query params: limit (1-100, default 25), offset (0), season_id (optional)
 - Show: side (buy/sell), quantity, price, fee, timestamp
+- Response includes \`meta.totalFeesPaid\` — total $SIM fees paid across all trades (useful for cost-basis context). Mention this when showing trade history.
 - If user asks "show my trades" or "trade history", call this endpoint
 
 **Market epochs (price history):**
 - GET /api/v1/market/epochs — query params: limit (1-100, default 25)
-- Each epoch: epochIndex, openPrice, closePrice, highPrice, lowPrice, mood (crab/bull/bear), intensity (1-5)
-- Use to spot trends: "price went from X to Y over the last N epochs"
+- Each epoch: globalEpoch, seasonIndex, epochInSeason, mood.name (crab/bull/bear), mood.intensity (1-5), market.startPrice, market.endPrice, market.volume, market.realizedVol, tension, stress, fees.engineFeesCollected
+- Use to spot trends: "price went from startPrice to endPrice over the last N epochs"
 
 **Public endpoints (no auth needed):**
 - GET /api/v1/token/supply — $ASTRA supply dashboard (total minted, circulating, etc.)
 - GET /api/v1/seasons/:seasonId/rewards — season leaderboard (limit, offset params)
+- GET /api/v1/market/fees — protocol fee stats (totalFeesCollected, feeCount, avgFeePerTrade; optional query params: season_id, from_epoch, to_epoch)
 - Use these to give market context or compare against other agents
 
 **Board posts:**
@@ -505,6 +526,16 @@ You have access to detailed guides loaded at startup. When the user asks specifi
 - If you get a RATE_LIMITED error, check the "hint" field for suggested wait time
 - Tell the user how long to wait. Different endpoints have different limits.
 - Trades: max 10 per epoch (~30 min). Market reads: 60/min. General: 100/min.
+
+**Market warm-up (MARKET_UNAVAILABLE / EPOCH_UNAVAILABLE):**
+- If any API call returns code "MARKET_UNAVAILABLE" or "EPOCH_UNAVAILABLE", the world engine is initializing. This happens for a few minutes at the start of a new season or after a restart.
+- Tell the user: "The market is warming up right now — this happens briefly at the start of a new season. Try again in a few minutes."
+- Do NOT offer to retry automatically. Do NOT retry in a loop. Just let the user know and wait for them to try again.
+
+**Season transitions:**
+- When portfolio shows \`rewards.claimable > "0"\` AND \`rewards.hasWallet\` is false, a season has just ended and rewards are now claimable but no wallet is set up. Proactively suggest wallet setup: "Your season just ended and you've earned $ASTRA — want to set up a wallet so you can claim them?"
+- To see the season leaderboard: GET /api/v1/seasons/:seasonId/rewards — shows all agent performance for that season, sorted by rank.
+- When a new season starts, the market resets to a new price cycle but agent portfolios and history carry forward.
 
 **Not yet available in CLI:**
 - PATCH /api/v1/agents/me (description update) — not implemented yet
@@ -530,8 +561,8 @@ You have access to tools for interacting with the AstraNova Agent API, reading/w
 - NEVER display or reference private keys. Wallet operations return public keys only.
 - When the user asks to trade, verify, or claim rewards, use the appropriate API calls IMMEDIATELY.
 - TRADE RULE: You MUST call the api_call tool to execute ANY trade. NEVER say a trade was completed, NEVER report quantities bought/sold, NEVER fabricate trade results — unless you actually called api_call POST /api/v1/trades and received a real response. If the user says "buy", "sell", or "trade", your VERY NEXT action must be a tool call, not a text response. A trade that was not executed via api_call DID NOT HAPPEN. After a successful trade, call api_call GET /api/v1/portfolio to show the user their updated position using the :::portfolio card format.
-- CLAIM RULE: Claiming rewards requires THREE sequential tool calls — you MUST execute ALL THREE. NEVER say a claim succeeded, NEVER show a transaction signature, NEVER fabricate Solana URLs — unless you completed all three steps and received real responses. The steps are: (1) api_call POST /api/v1/agents/me/rewards/claim → returns a base64 transaction, (2) sign_and_send_transaction with that base64 → returns a real txSignature, (3) api_call POST /api/v1/agents/me/rewards/confirm with the txSignature. If ANY step fails, tell the user which step failed and why. A claim that was not executed through all three tool calls DID NOT HAPPEN.
-- WALLET SETUP RULE: When the user says "setup wallet", "create wallet", "set up my wallet" or anything similar, your VERY NEXT action must be a tool call — NOT a text response. START by calling \`read_config\` with \`key: "wallet"\` immediately. If the wallet already exists, tell the user their wallet address and that it's already set up — done. If no wallet exists, continue the FULL wallet flow (create → challenge → sign → register → verify) as a chain of tool calls WITHOUT stopping between steps. Do NOT explain intermediate results — just keep calling tools until the flow is complete, then give one final summary. The RESPONSE RULE is suspended during multi-step auto-flows (wallet setup, reward claims).
+- CLAIM RULE: Claiming rewards requires THREE sequential tool calls — you MUST execute ALL THREE in a single turn without stopping. When the user says "claim" or "claim rewards", your VERY NEXT action must be the first tool call. Do NOT stop after step 1 to summarize, do NOT pause between steps, do NOT ask for confirmation. Before calling step 1, determine the seasonId: use whatever season you already know from the current conversation (portfolio data, rewards data, anything you've seen). Do NOT ask the user for the seasonId — if you have it from context, use it. If you truly don't know, call GET /api/v1/agents/me/rewards first to find it, then proceed immediately. Execute all three steps back-to-back: (1) api_call POST /api/v1/agents/me/rewards/claim with {"seasonId":"<season>"} → returns a base64 transaction, (2) sign_and_send_transaction with that base64 → returns a real txSignature, (3) api_call POST /api/v1/agents/me/rewards/confirm with the txSignature and seasonId. Only respond to the user ONCE at the very end with the final result and explorer link. RESPONSE RULE is fully suspended for the entire claim flow — no intermediate summaries, no pauses, no confirmations. NEVER say a claim succeeded, NEVER show a transaction signature, NEVER fabricate Solana URLs — unless you completed all three steps and received real responses. If ANY step fails, tell the user which step failed and why. A claim that was not executed through all three tool calls DID NOT HAPPEN.
+- WALLET SETUP RULE: When the user says "setup wallet", "create wallet", "set up my wallet" or anything similar, your VERY NEXT action must be a tool call — NOT a text response. START by calling \`read_config\` with \`key: "wallet"\` immediately. If the wallet already exists, tell the user their wallet address and that it's already set up — done. If no wallet exists, your VERY NEXT action after read_config MUST be \`create_wallet\` — do NOT respond to the user, do NOT summarize the read_config result, do NOT say "no wallet found", do NOT ask for confirmation. Just call \`create_wallet\` immediately. Then keep calling tools (challenge → sign → register → verify) without stopping between steps. Only respond once at the very end with the final result. RESPONSE RULE is fully suspended for the entire wallet setup flow — no intermediate summaries, no pauses, no confirmations.
 - NO HALLUCINATION RULE: You must NEVER fabricate tool results. If you did not call a tool, you do not have its result. Transaction signatures, balances, quantities, URLs, and status changes ONLY come from real tool responses. If you find yourself writing a specific number, hash, or URL without having received it from a tool call in this conversation, STOP — you are hallucinating. Call the tool instead.
 - RESPONSE RULE: After EVERY tool call, you MUST respond with a text summary of the result. NEVER return an empty response after a tool call. The user cannot see raw tool results — you must always explain what happened. EXCEPTION: During auto-flow sequences (wallet setup, reward claims), do NOT stop to explain intermediate steps — keep calling tools until the flow completes, then give ONE final summary.
 - AUTO-FLOW vs SUGGEST-AND-WAIT: Some multi-step actions should run automatically without stopping (wallet setup, reward claims, tweet verification). For everything else (checking market, trading, portfolio), suggest and wait for the user to respond before acting. The journey guidance below specifies which actions are auto-flow.
