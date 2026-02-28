@@ -1,14 +1,32 @@
-import React, { useState, useCallback, useRef } from "react";
-import { Box, Text, useApp, useInput } from "ink";
+import React, { useState, useCallback, useRef, useEffect } from "react";
+import { Box, Text, useApp, useInput, useStdout } from "ink";
 import type { CoreMessage } from "ai";
-import StatusBar from "./StatusBar.js";
+import TopBar from "./TopBar.js";
 import ChatView, { type ChatMessage } from "./ChatView.js";
+import AutopilotLog from "./AutopilotLog.js";
 import Input from "./Input.js";
 import Spinner from "./Spinner.js";
 import { runAgentTurn } from "../agent/loop.js";
-import { isRestartRequested, loadConfig } from "../config/store.js";
+import { isRestartRequested, loadConfig, saveAutopilotConfig } from "../config/store.js";
 import { saveSession } from "../config/sessions.js";
 import type { AgentProfile } from "../agent/system-prompt.js";
+import type { AutopilotConfig, AutopilotLogEntry } from "../autopilot/scheduler.js";
+import {
+  buildAutopilotTrigger,
+  formatInterval,
+  parseInterval,
+  MAX_LOG_ENTRIES,
+  CALLS_PER_AUTOPILOT_TURN,
+  EPOCH_BUDGET,
+  BUDGET_BUFFER,
+} from "../autopilot/scheduler.js";
+
+/** Minimum terminal size for the dashboard layout. */
+const MIN_COLS = 100;
+const MIN_ROWS = 28;
+
+/** Width of the autopilot log panel. */
+const LOG_PANEL_WIDTH = 38;
 
 interface AppProps {
   agentName: string;
@@ -23,6 +41,7 @@ interface AppProps {
   memoryContent?: string;
   initialCoreMessages?: CoreMessage[];
   initialChatMessages?: Array<{ role: string; content: string }>;
+  initialAutopilotConfig?: AutopilotConfig;
   debug?: boolean;
 }
 
@@ -39,9 +58,27 @@ export default function App({
   memoryContent,
   initialCoreMessages,
   initialChatMessages,
+  initialAutopilotConfig,
   debug,
 }: AppProps): React.JSX.Element {
   const { exit } = useApp();
+  const { stdout } = useStdout();
+
+  // Terminal dimensions
+  const [cols, setCols] = useState(stdout?.columns ?? 120);
+  const [rows, setRows] = useState(stdout?.rows ?? 40);
+
+  useEffect(() => {
+    if (!stdout) return;
+    const onResize = () => {
+      setCols(stdout.columns);
+      setRows(stdout.rows);
+    };
+    stdout.on("resize", onResize);
+    return () => { stdout.off("resize", onResize); };
+  }, [stdout]);
+
+  // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(
     (initialChatMessages as ChatMessage[]) ?? [],
   );
@@ -49,11 +86,26 @@ export default function App({
     initialCoreMessages ?? [],
   );
   const providerRef = useRef(loadConfig()?.provider ?? "unknown");
-  const [streamingText, setStreamingText] = useState<string | undefined>(
-    undefined,
-  );
+  const [streamingText, setStreamingText] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
+  const isLoadingRef = useRef(false);
+  useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
   const [toolName, setToolName] = useState<string | undefined>(undefined);
+
+  // Autopilot state
+  const [autopilotMode, setAutopilotMode] = useState(initialAutopilotConfig?.mode ?? "off");
+  const [autopilotIntervalMs, setAutopilotIntervalMs] = useState(initialAutopilotConfig?.intervalMs ?? 300_000);
+  const [autopilotLogEntries, setAutopilotLogEntries] = useState<AutopilotLogEntry[]>([]);
+
+  // Epoch call budget counter
+  const epochCallCountRef = useRef(0);
+  const epochIdRef = useRef<number | null>(null);
+
+  // Refs for autopilot timer closure stability
+  const coreMessagesRef = useRef(coreMessages);
+  useEffect(() => { coreMessagesRef.current = coreMessages; }, [coreMessages]);
+  const chatMessagesRef = useRef(chatMessages);
+  useEffect(() => { chatMessagesRef.current = chatMessages; }, [chatMessages]);
 
   // Ctrl+C to exit
   useInput((_input, key) => {
@@ -62,13 +114,130 @@ export default function App({
     }
   });
 
+  // Epoch change handler — resets the autopilot call budget
+  const handleEpochChange = useCallback((newEpoch: number) => {
+    epochIdRef.current = newEpoch;
+    epochCallCountRef.current = 0;
+  }, []);
 
+  // Add a log entry (capped at MAX_LOG_ENTRIES)
+  const addLogEntry = useCallback((action: string, detail?: string) => {
+    setAutopilotLogEntries((prev) => {
+      const entry: AutopilotLogEntry = { ts: new Date(), action, detail };
+      const next = [...prev, entry];
+      return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next;
+    });
+  }, []);
 
+  // ── runAutopilotTurn (full mode — separate from chat) ─────────────
+  const runAutopilotTurn = useCallback(
+    async (triggerMsg: string) => {
+      const currentCore = coreMessagesRef.current;
+      const newCoreMessages: CoreMessage[] = [
+        ...currentCore,
+        { role: "user", content: triggerMsg },
+      ];
+
+      setIsLoading(true);
+      try {
+        const result = await runAgentTurn(
+          newCoreMessages,
+          skillContext,
+          tradingContext,
+          walletContext,
+          rewardsContext,
+          onboardingContext,
+          apiContext,
+          { ...profile, autopilotMode },
+          {
+            onTextChunk: () => {},
+            onToolCallStart: () => {},
+            onToolCallEnd: () => {},
+          },
+          memoryContent,
+        );
+
+        const baseCoreMessages = result.compactedMessages ?? newCoreMessages;
+        const updatedCore = [...baseCoreMessages, ...result.responseMessages];
+        setCoreMessages(updatedCore);
+
+        // Parse the response — add to log
+        const responseText = result.text.trim();
+        if (responseText) {
+          // Extract a short summary for the log
+          const firstLine = responseText.split("\n")[0].slice(0, 80);
+          const detail = responseText.length > 80 ? responseText.slice(0, 120) : undefined;
+          addLogEntry(firstLine, detail !== firstLine ? detail : undefined);
+
+          // If the LLM actually did something (not just "holding"), notify chat
+          const lower = responseText.toLowerCase();
+          const didAct = lower.includes("bought") || lower.includes("sold") || lower.includes("executed");
+          if (didAct) {
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: `🤖 Autopilot: ${firstLine}` },
+            ]);
+          }
+        } else {
+          addLogEntry("checked → no response");
+        }
+
+        // Persist session
+        const updatedChat = chatMessagesRef.current;
+        saveSession({
+          agentName,
+          provider: providerRef.current,
+          sessionId,
+          coreMessages: updatedCore,
+          chatMessages: updatedChat,
+        });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        addLogEntry("error", message);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry],
+  );
+
+  // ── Autopilot timer ────────────────────────────────────────────────
+  useEffect(() => {
+    if (autopilotMode === "off") return;
+
+    const interval = setInterval(() => {
+      // Skip if a turn is already running
+      if (isLoadingRef.current) return;
+
+      // Budget check
+      if (epochCallCountRef.current + CALLS_PER_AUTOPILOT_TURN > EPOCH_BUDGET - BUDGET_BUFFER) {
+        addLogEntry("Budget reached — skipping until next epoch");
+        return;
+      }
+      epochCallCountRef.current += CALLS_PER_AUTOPILOT_TURN;
+
+      const trigger = buildAutopilotTrigger(autopilotMode);
+      if (!trigger) return;
+
+      if (autopilotMode === "semi") {
+        // Semi: inject into chat via sendMessage path
+        void handleSubmit(trigger);
+      } else {
+        // Full: separate turn, results go to log only
+        void runAutopilotTurn(trigger);
+      }
+    }, autopilotIntervalMs);
+
+    return () => clearInterval(interval);
+  }, [autopilotMode, autopilotIntervalMs, addLogEntry, runAutopilotTurn]);
+
+  // ── sendMessage ────────────────────────────────────────────────────
   const sendMessage = useCallback(
     async (userText: string) => {
       // ── Slash commands (handled locally, never sent to LLM) ────
       if (userText.startsWith("/")) {
-        const cmd = userText.split(" ")[0].toLowerCase();
+        const parts = userText.trim().split(/\s+/);
+        const cmd = parts[0].toLowerCase();
 
         if (cmd === "/exit" || cmd === "/quit" || cmd === "/q") {
           exit();
@@ -85,6 +254,84 @@ export default function App({
             ...prev,
             { role: "user", content: userText },
             { role: "assistant", content: "Manual compaction is not implemented yet — it happens automatically when context gets large." },
+          ]);
+          return;
+        }
+
+        // ── /auto slash commands ────
+        if (cmd === "/auto") {
+          const sub = parts[1]?.toLowerCase();
+
+          if (!sub || sub === "status") {
+            const modeLabel = autopilotMode.toUpperCase();
+            const intervalLabel = formatInterval(autopilotIntervalMs);
+            const budgetLabel = `${epochCallCountRef.current}/${EPOCH_BUDGET}`;
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `**Autopilot Status**\n\nMode: ${modeLabel}\nInterval: ${intervalLabel}\nEpoch Budget: ${budgetLabel} calls used` },
+            ]);
+            return;
+          }
+
+          if (sub === "on" || sub === "semi") {
+            setAutopilotMode("semi");
+            saveAutopilotConfig({ mode: "semi", intervalMs: autopilotIntervalMs });
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `Autopilot enabled: **SEMI** mode (every ${formatInterval(autopilotIntervalMs)}). I'll propose trades for your approval.` },
+            ]);
+            addLogEntry("Mode set to SEMI");
+            return;
+          }
+
+          if (sub === "full") {
+            setAutopilotMode("full");
+            saveAutopilotConfig({ mode: "full", intervalMs: autopilotIntervalMs });
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `Autopilot enabled: **FULL** mode (every ${formatInterval(autopilotIntervalMs)}). I'll execute trades autonomously — check the log panel.` },
+            ]);
+            addLogEntry("Mode set to FULL");
+            return;
+          }
+
+          if (sub === "off") {
+            setAutopilotMode("off");
+            saveAutopilotConfig({ mode: "off", intervalMs: autopilotIntervalMs });
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: "Autopilot disabled." },
+            ]);
+            addLogEntry("Autopilot OFF");
+            return;
+          }
+
+          // Try parsing interval (e.g., "5m", "10m", "30m")
+          const parsed = parseInterval(sub);
+          if (parsed !== null) {
+            setAutopilotIntervalMs(parsed);
+            // If autopilot is off, also turn it on in semi mode
+            const newMode = autopilotMode === "off" ? "semi" : autopilotMode;
+            setAutopilotMode(newMode);
+            saveAutopilotConfig({ mode: newMode, intervalMs: parsed });
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `Autopilot interval set to **${formatInterval(parsed)}**. Mode: ${newMode.toUpperCase()}.` },
+            ]);
+            addLogEntry(`Interval set to ${formatInterval(parsed)}`);
+            return;
+          }
+
+          // Unknown /auto subcommand
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "user", content: userText },
+            { role: "assistant", content: "Usage: `/auto on` · `/auto full` · `/auto off` · `/auto 5m` · `/auto status`" },
           ]);
           return;
         }
@@ -107,13 +354,13 @@ export default function App({
                 "  `/buy <amt>` — Buy $NOVA (e.g. `/buy 500`)",
                 "  `/sell <amt>`— Sell $NOVA (e.g. `/sell 200`)",
                 "",
-                "**Ask me about**",
+                "**Autopilot**",
                 "",
-                "  \"how do epochs and seasons work?\"",
-                "  \"what are the trading rules?\"",
-                "  \"how do I earn $ASTRA?\"",
-                "  \"show the season leaderboard\"",
-                "  \"what is $ASTRA token supply?\"",
+                "  `/auto on`     — Enable semi-auto mode",
+                "  `/auto full`   — Enable full-auto mode",
+                "  `/auto off`    — Disable autopilot",
+                "  `/auto 5m`     — Set interval (1m-60m)",
+                "  `/auto status` — Show autopilot status",
                 "",
                 "**System**",
                 "",
@@ -135,12 +382,11 @@ export default function App({
           "/trades": "Show my recent trade history.",
           "/board": "Show recent posts from the board.",
           "/wallet": "Check my wallet status — do I have one set up?",
-          "/buy": `Buy ${userText.split(" ").slice(1).join(" ") || "some"} $NOVA.`,
-          "/sell": `Sell ${userText.split(" ").slice(1).join(" ") || "some"} $NOVA.`,
+          "/buy": `Buy ${parts.slice(1).join(" ") || "some"} $NOVA.`,
+          "/sell": `Sell ${parts.slice(1).join(" ") || "some"} $NOVA.`,
         };
 
         if (shortcuts[cmd]) {
-          // Fall through to normal sendMessage flow with the mapped text
           userText = shortcuts[cmd];
         } else {
           // Unknown slash command — show hint
@@ -176,7 +422,7 @@ export default function App({
           rewardsContext,
           onboardingContext,
           apiContext,
-          profile,
+          { ...profile, autopilotMode },
           {
             onTextChunk: (chunk) => {
               setStreamingText((prev) => (prev ?? "") + chunk);
@@ -197,7 +443,6 @@ export default function App({
 
         let updatedChat: ChatMessage[];
         if (result.compactedMessages) {
-          // Trim display messages — show a marker + recent messages
           const marker: ChatMessage = { role: "assistant", content: "— earlier messages compacted —" };
           const recentChat = chatMessages.slice(-12);
           updatedChat = [
@@ -229,13 +474,12 @@ export default function App({
 
         // Auto-exit if a restart was requested (agent switch/create)
         if (isRestartRequested()) {
-          setTimeout(() => exit(), 1500); // Brief delay so user sees the message
+          setTimeout(() => exit(), 1500);
         }
       } catch (error: unknown) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
         const stack = error instanceof Error ? error.stack : undefined;
-        // Log to stderr for debugging (visible after Ink exits)
         process.stderr.write(`[astra] Error: ${message}\n`);
         const debugInfo = debug && stack ? `\n\n\`\`\`\n${stack}\n\`\`\`` : "";
         setChatMessages((prev) => [
@@ -249,7 +493,7 @@ export default function App({
         setToolName(undefined);
       }
     },
-    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, agentName, sessionId],
+    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry],
   );
 
   const handleSubmit = useCallback(
@@ -259,26 +503,63 @@ export default function App({
     [sendMessage],
   );
 
+  // ── Resize guard ──────────────────────────────────────────────────
+  if (cols < MIN_COLS || rows < MIN_ROWS) {
+    return (
+      <Box flexDirection="column" alignItems="center" justifyContent="center" width="100%" height="100%">
+        <Text color="yellow" bold>Terminal too small</Text>
+        <Text> </Text>
+        <Text>Current: {cols}×{rows}</Text>
+        <Text>Minimum: {MIN_COLS}×{MIN_ROWS}</Text>
+        <Text> </Text>
+        <Text dimColor>Resize your terminal to continue.</Text>
+      </Box>
+    );
+  }
+
+  const showLogPanel = autopilotMode !== "off";
+
   return (
     <Box flexDirection="column" width="100%" height="100%">
-      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-        <ChatView messages={chatMessages} streamingText={streamingText} />
+      {/* TopBar: 2-row header */}
+      <Box flexShrink={0} width="100%">
+        <TopBar
+          agentName={agentName}
+          journeyStage={profile.journeyStage ?? "full"}
+          autopilotMode={autopilotMode}
+          autopilotIntervalMs={autopilotIntervalMs}
+          epochCallCount={epochCallCountRef.current}
+          onEpochChange={handleEpochChange}
+        />
       </Box>
 
-      {isLoading && toolName && <Spinner label={`Calling ${toolName}...`} />}
-      {isLoading && !toolName && <Spinner label={streamingText ? "Thinking..." : undefined} />}
+      {/* Main area: Chat + optional AutopilotLog */}
+      <Box flexDirection="row" flexGrow={1} flexShrink={1}>
+        {/* Chat column */}
+        <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+          <ChatView messages={chatMessages} streamingText={streamingText} />
 
+          {isLoading && toolName && <Spinner label={`Calling ${toolName}...`} />}
+          {isLoading && !toolName && <Spinner label={streamingText ? "Thinking..." : undefined} />}
+        </Box>
+
+        {/* Autopilot log panel (visible when AP is on) */}
+        {showLogPanel && (
+          <Box flexShrink={0}>
+            <AutopilotLog entries={autopilotLogEntries} width={LOG_PANEL_WIDTH} />
+          </Box>
+        )}
+      </Box>
+
+      {/* Input */}
       <Box flexShrink={0} width="100%">
         <Input isActive={!isLoading} onSubmit={handleSubmit} />
       </Box>
 
-      <Box flexShrink={0} width="100%">
-        <StatusBar agentName={agentName} journeyStage={profile.journeyStage ?? "full"} />
-      </Box>
-
+      {/* Footer */}
       <Box flexShrink={0} width="100%" paddingX={2} justifyContent="space-between">
         <Text dimColor>/help · /portfolio · /market · /exit</Text>
-        <Text dimColor>Ctrl+C quit</Text>
+        <Text dimColor>/auto on·off·set · Ctrl+C quit</Text>
       </Box>
     </Box>
   );

@@ -12,6 +12,7 @@ export interface AgentProfile {
   isNewAgent?: boolean;
   boardPosted?: boolean;
   journeyStage?: JourneyStage;
+  autopilotMode?: "off" | "semi" | "full";
 }
 
 /**
@@ -113,6 +114,23 @@ export function buildSystemPrompt(
 
   if (profile.season !== undefined) {
     parts.push(`Season: ${profile.season}`);
+  }
+
+  // Inject autopilot instructions when active
+  const apMode = profile.autopilotMode ?? "off";
+  if (apMode !== "off") {
+    parts.push("", "---", "");
+    parts.push(`## AUTOPILOT: ${apMode.toUpperCase()}`);
+    parts.push("");
+    parts.push(`On AUTOPILOT CHECK triggers:`);
+    parts.push(`- GET /api/v1/market/state + GET /api/v1/portfolio`);
+    parts.push(`- Apply strategy from memory.md (default: momentum + balance)`);
+    if (apMode === "semi") {
+      parts.push(`- SEMI: propose trade, wait for explicit user approval`);
+    } else {
+      parts.push(`- FULL: execute if signal clear; skip if uncertain`);
+    }
+    parts.push(`- Max 2-3 lines. No action = "Market checked — holding."`);
   }
 
   // Inject persistent memory if available

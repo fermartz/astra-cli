@@ -29,6 +29,12 @@ export const ConfigSchema = z.object({
       theme: z.enum(["dark", "light"]).default("dark"),
     })
     .default({}),
+  autopilot: z
+    .object({
+      mode: z.enum(["off", "semi", "full"]).default("off"),
+      intervalMs: z.number().min(60000).max(3600000).default(300000),
+    })
+    .default({ mode: "off", intervalMs: 300000 }),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

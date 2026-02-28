@@ -75,6 +75,23 @@ export function saveConfig(config: Config): void {
 }
 
 // ---------------------------------------------------------------------------
+// Autopilot Config (stored inside config.json → autopilot)
+// ---------------------------------------------------------------------------
+
+/** Load autopilot config. Returns defaults if config is missing. */
+export function loadAutopilotConfig(): { mode: "off" | "semi" | "full"; intervalMs: number } {
+  const config = loadConfig();
+  return config?.autopilot ?? { mode: "off", intervalMs: 300_000 };
+}
+
+/** Save autopilot config (merges into existing config.json). */
+export function saveAutopilotConfig(autopilot: { mode: "off" | "semi" | "full"; intervalMs: number }): void {
+  const config = loadConfig();
+  if (!config) return;
+  saveConfig({ ...config, autopilot });
+}
+
+// ---------------------------------------------------------------------------
 // Global State (~/.config/astranova/state.json)
 // ---------------------------------------------------------------------------
 
