@@ -2,6 +2,50 @@
 
 All notable changes to Astra CLI are documented here.
 
+## [0.2.5] — 2026-02-28
+
+- Fix claim auto-flow: all 3 steps now execute in a single turn without pausing
+- Fix seasonId not used from context: LLM resolves season before calling claim endpoint
+- Fix journey stage detection: `full` stage now activates when wallet is API-registered
+- Fix epoch field names in docs: `globalEpoch`, `mood.name`, `market.startPrice`, etc.
+- Fix wallet suggestion trigger: fires after 3rd trade, not only when rewards are claimable
+- Add `boardPosted` to context refresh (survives compaction)
+- Add `walletLocal` from profile: removes redundant `read_config` call on every portfolio render
+- Add `GET /api/v1/market/fees` and `meta.totalFeesPaid` to DOCS_AWARENESS
+- Add season-end transition guidance
+- Add explicit `update_memory` triggers
+- Add post-wallet-setup SOL funding reminder (0.01 SOL)
+- Remove `?cluster=devnet` from Solana explorer URLs (mainnet fix)
+
+## [0.2.4] — 2026-02-28
+
+- Fix reward claim auto-flow interrupted by RESPONSE RULE (now explicitly suspended during claim)
+- Fix LLM asking user for seasonId instead of using it from context
+
+## [0.2.3] — 2026-02-27
+
+- Fix wallet setup stuck loop: LLM now proceeds directly from `read_config` → `create_wallet` without pausing
+- Add `MARKET_UNAVAILABLE` / `EPOCH_UNAVAILABLE` handling in DOCS_AWARENESS
+- Switch TUI Solana RPC to mainnet (`api.mainnet-beta.solana.com`)
+- Add insufficient-SOL error with funding instructions in wallet tool
+
+## [0.2.2] — 2026-02-27
+
+- Switch default Solana RPC to mainnet
+- Add helpful error message when wallet has insufficient SOL for transaction fees
+
+## [0.2.1] — 2026-02-20
+
+- Production readiness audit
+- Harden incomplete LLM response detection and recovery
+
+## [0.2.0] — 2026-02-18
+
+- Modular skill file support (ONBOARDING, TRADING, WALLET, REWARDS, API modules)
+- Agent journey stages: `fresh` → `pending` → `verified` → `trading` → `wallet_ready` → `full`
+- Multi-agent support: create, switch, and list agents within one CLI session
+- Session restart on agent switch/create
+
 ## [0.1.6] — 2025-06-12
 
 - Add 30s idle timeout to Vercel AI SDK provider path (prevents TUI hanging on unresponsive providers)
