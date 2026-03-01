@@ -2,20 +2,27 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Box, Text } from "ink";
 import { apiCall } from "../utils/http.js";
 import type { JourneyStage } from "../agent/system-prompt.js";
+import type { AutopilotMode } from "../autopilot/scheduler.js";
+import { formatInterval } from "../autopilot/scheduler.js";
 
 interface StatusBarProps {
   agentName: string;
   journeyStage: JourneyStage;
+  autopilotMode?: AutopilotMode;
+  autopilotIntervalMs?: number;
+  onEpochChange?: (epochId: number) => void;
 }
 
 interface MarketState {
   price: number;
   mood: string;
+  epochId: number;
 }
 
 interface Portfolio {
   cash: number;
   tokens: number;
+  portfolioValue: number;
   pnl: number;
   pnlPct: number;
 }
@@ -25,11 +32,14 @@ interface BarData {
   portfolio: Portfolio | null;
 }
 
-const POLL_INTERVAL_MS = 30_000; // 30 seconds
+const POLL_INTERVAL_MS = 60_000; // 60 seconds
 
 const StatusBar = React.memo(function StatusBar({
   agentName,
   journeyStage,
+  autopilotMode = "off",
+  autopilotIntervalMs = 300_000,
+  onEpochChange,
 }: StatusBarProps): React.JSX.Element {
   // Single state object to batch market + portfolio updates into one render
   const [data, setData] = useState<BarData>({ market: null, portfolio: null });
@@ -46,7 +56,10 @@ const StatusBar = React.memo(function StatusBar({
       market: marketRes ?? prev.market,
       portfolio: portfolioRes ?? prev.portfolio,
     }));
-  }, [agentName]);
+    if (marketRes && onEpochChange) {
+      onEpochChange(marketRes.epochId);
+    }
+  }, [agentName, onEpochChange]);
 
   useEffect(() => {
     mounted.current = true;
@@ -64,19 +77,22 @@ const StatusBar = React.memo(function StatusBar({
 
   const { market, portfolio } = data;
 
+  const apActive = autopilotMode !== "off";
+
   return (
     <Box flexDirection="column" width="100%">
-      <Box paddingX={1}>
-        <Text bold color="green">
+      <Box paddingX={1} justifyContent="space-between">
+        <Box>
+        <Text bold color="#00ff00">
           AstraNova
         </Text>
         <Text dimColor> │ </Text>
-        <Text color="white">{agentName}</Text>
+        <Text color="#ff8800">{agentName}</Text>
 
         {canFetchData && market && (
           <>
             <Text dimColor> │ </Text>
-            <Text color="yellow">$NOVA </Text>
+            <Text color="#ffff00">$NOVA </Text>
             <Text color="white">{formatPrice(market.price)}</Text>
             <Text dimColor> │ </Text>
             <Text color={moodColor(market.mood)}>{market.mood}</Text>
@@ -86,21 +102,23 @@ const StatusBar = React.memo(function StatusBar({
         {canFetchData && portfolio && (
           <>
             <Text dimColor> │ </Text>
-            <Text color="cyan">{formatNum(portfolio.cash)} $SIM</Text>
+            <Text color="#00ffff">{formatNum(portfolio.cash)} $SIM</Text>
             {portfolio.tokens > 0 && (
               <>
                 <Text dimColor> │ </Text>
-                <Text color="magenta">{formatNum(portfolio.tokens)} $NOVA</Text>
+                <Text color="#ff00ff">{formatNum(portfolio.tokens)} $NOVA</Text>
               </>
             )}
             {portfolio.pnl !== 0 && (
               <>
                 <Text dimColor> │ </Text>
-                <Text color={portfolio.pnl >= 0 ? "green" : "red"}>
+                <Text color={portfolio.pnl >= 0 ? "#00ff00" : "#ff4444"}>
                   P&L {portfolio.pnl >= 0 ? "+" : ""}{formatNum(portfolio.pnl)} ({portfolio.pnlPct >= 0 ? "+" : ""}{portfolio.pnlPct.toFixed(1)}%)
                 </Text>
               </>
             )}
+            <Text dimColor> │ </Text>
+            <Text color="#e2f902">Val {formatNum(portfolio.portfolioValue)}</Text>
           </>
         )}
 
@@ -116,6 +134,11 @@ const StatusBar = React.memo(function StatusBar({
             <Text dimColor> │ </Text>
             <Text dimColor>loading...</Text>
           </>
+        )}
+        </Box>
+
+        {apActive && (
+          <Text color="#00ff00">AP: ● {autopilotMode.toUpperCase()} {formatInterval(autopilotIntervalMs)}</Text>
         )}
       </Box>
     </Box>
@@ -142,12 +165,12 @@ function moodColor(mood: string): string {
   switch (mood) {
     case "euphoria":
     case "bullish":
-      return "green";
+      return "#00ff00";
     case "fear":
     case "bearish":
-      return "red";
+      return "#ff4444";
     case "crab":
-      return "yellow";
+      return "#ffff00";
     default:
       return "white";
   }
@@ -159,10 +182,12 @@ interface MarketApiResponse {
   market?: {
     price?: number;
     mood?: string;
+    epoch?: { global?: number; [key: string]: unknown };
     [key: string]: unknown;
   };
   price?: number;
   mood?: string;
+  epoch?: { global?: number; [key: string]: unknown };
   [key: string]: unknown;
 }
 
@@ -176,6 +201,7 @@ async function fetchMarket(agentName: string): Promise<MarketState | null> {
   return {
     price: m.price ?? 0,
     mood: m.mood ?? "",
+    epochId: (m.epoch as { global?: number } | undefined)?.global ?? 0,
   };
 }
 
@@ -183,13 +209,16 @@ interface PortfolioApiResponse {
   portfolio?: {
     cash?: number;
     tokens?: number;
+    portfolioValue?: number;
+    currentPrice?: number;
     pnl?: number;
     pnlPct?: number;
-    currentPrice?: number;
     [key: string]: unknown;
   };
   cash?: number;
   tokens?: number;
+  portfolioValue?: number;
+  currentPrice?: number;
   pnl?: number;
   pnlPct?: number;
   [key: string]: unknown;
@@ -207,9 +236,13 @@ async function fetchPortfolio(agentName: string): Promise<Portfolio | null> {
   const d = result.data;
   // Handle nested (d.portfolio.cash) or flat (d.cash) response
   const p = d.portfolio ?? d;
+  const cash = p.cash ?? 0;
+  const tokens = p.tokens ?? 0;
+  const currentPrice = p.currentPrice ?? 0;
   return {
-    cash: p.cash ?? 0,
-    tokens: p.tokens ?? 0,
+    cash,
+    tokens,
+    portfolioValue: p.portfolioValue ?? cash + tokens * currentPrice,
     pnl: p.pnl ?? 0,
     pnlPct: p.pnlPct ?? 0,
   };

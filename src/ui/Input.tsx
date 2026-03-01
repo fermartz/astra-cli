@@ -23,20 +23,16 @@ export default function Input({
   };
 
   return (
-    <Box width="100%" borderStyle="round" borderColor={isActive ? "yellow" : "gray"}>
-      <Box paddingX={1} width="100%">
-        <Text color={isActive ? "yellow" : "gray"} bold>
-          {"› "}
-        </Text>
-        <TextInput
-          value={value}
-          onChange={setValue}
-          onSubmit={handleSubmit}
-          focus={isActive}
-          showCursor={isActive}
-          placeholder={isActive ? "Type a message..." : "Waiting for response..."}
-        />
-      </Box>
+    <Box width="100%" paddingX={2} paddingY={1}>
+      <Text color={isActive ? "yellow" : "gray"} bold>{"❯❯  "}</Text>
+      <TextInput
+        value={value}
+        onChange={setValue}
+        onSubmit={handleSubmit}
+        focus={isActive}
+        showCursor={isActive}
+        placeholder=""
+      />
     </Box>
   );
 }

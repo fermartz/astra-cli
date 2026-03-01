@@ -8,6 +8,7 @@ import {
   credentialsPath,
   walletPath,
   pendingClaimPath,
+  epochBudgetPath,
   agentDir,
   ensureDir,
   ensureBaseStructure,
@@ -250,6 +251,36 @@ export function loadPendingClaim(agentName: string): PendingClaim | null {
     return JSON.parse(raw) as PendingClaim;
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Epoch Budget (~/.config/astranova/agents/<name>/epoch_budget.json)
+// ---------------------------------------------------------------------------
+
+export interface EpochBudget {
+  epochId: number;
+  callCount: number;
+}
+
+/** Load the persisted epoch budget. Returns null if not found or unparseable. */
+export function loadEpochBudget(agentName: string): EpochBudget | null {
+  const filePath = epochBudgetPath(agentName);
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as EpochBudget;
+  } catch {
+    return null;
+  }
+}
+
+/** Save the epoch budget. Silently fails on error (non-critical). */
+export function saveEpochBudget(agentName: string, data: EpochBudget): void {
+  try {
+    ensureDir(agentDir(agentName));
+    writeFileSecure(epochBudgetPath(agentName), JSON.stringify(data));
+  } catch {
+    // non-critical
   }
 }
 

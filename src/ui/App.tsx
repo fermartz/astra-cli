@@ -1,32 +1,24 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { Box, Text, useApp, useInput, useStdout } from "ink";
+import { Box, Text, useApp, useInput } from "ink";
 import type { CoreMessage } from "ai";
-import TopBar from "./TopBar.js";
+import StatusBar from "./StatusBar.js";
 import ChatView, { type ChatMessage } from "./ChatView.js";
-import AutopilotLog from "./AutopilotLog.js";
 import Input from "./Input.js";
 import Spinner from "./Spinner.js";
 import { runAgentTurn } from "../agent/loop.js";
-import { isRestartRequested, loadConfig, saveAutopilotConfig } from "../config/store.js";
+import { isRestartRequested, loadConfig, saveAutopilotConfig, loadEpochBudget, saveEpochBudget } from "../config/store.js";
 import { saveSession } from "../config/sessions.js";
 import type { AgentProfile } from "../agent/system-prompt.js";
-import type { AutopilotConfig, AutopilotLogEntry } from "../autopilot/scheduler.js";
+import type { AutopilotConfig } from "../autopilot/scheduler.js";
 import {
   buildAutopilotTrigger,
   formatInterval,
   parseInterval,
-  MAX_LOG_ENTRIES,
   CALLS_PER_AUTOPILOT_TURN,
   EPOCH_BUDGET,
   BUDGET_BUFFER,
 } from "../autopilot/scheduler.js";
 
-/** Minimum terminal size for the dashboard layout. */
-const MIN_COLS = 100;
-const MIN_ROWS = 28;
-
-/** Width of the autopilot log panel. */
-const LOG_PANEL_WIDTH = 38;
 
 interface AppProps {
   agentName: string;
@@ -62,21 +54,6 @@ export default function App({
   debug,
 }: AppProps): React.JSX.Element {
   const { exit } = useApp();
-  const { stdout } = useStdout();
-
-  // Terminal dimensions
-  const [cols, setCols] = useState(stdout?.columns ?? 120);
-  const [rows, setRows] = useState(stdout?.rows ?? 40);
-
-  useEffect(() => {
-    if (!stdout) return;
-    const onResize = () => {
-      setCols(stdout.columns);
-      setRows(stdout.rows);
-    };
-    stdout.on("resize", onResize);
-    return () => { stdout.off("resize", onResize); };
-  }, [stdout]);
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(
@@ -95,17 +72,27 @@ export default function App({
   // Autopilot state
   const [autopilotMode, setAutopilotMode] = useState(initialAutopilotConfig?.mode ?? "off");
   const [autopilotIntervalMs, setAutopilotIntervalMs] = useState(initialAutopilotConfig?.intervalMs ?? 300_000);
-  const [autopilotLogEntries, setAutopilotLogEntries] = useState<AutopilotLogEntry[]>([]);
 
   // Epoch call budget counter
   const epochCallCountRef = useRef(0);
   const epochIdRef = useRef<number | null>(null);
+
+  // Load persisted epoch budget on mount
+  useEffect(() => {
+    const saved = loadEpochBudget(agentName);
+    if (saved) {
+      epochIdRef.current = saved.epochId;
+      epochCallCountRef.current = saved.callCount;
+    }
+  }, [agentName]);
 
   // Refs for autopilot timer closure stability
   const coreMessagesRef = useRef(coreMessages);
   useEffect(() => { coreMessagesRef.current = coreMessages; }, [coreMessages]);
   const chatMessagesRef = useRef(chatMessages);
   useEffect(() => { chatMessagesRef.current = chatMessages; }, [chatMessages]);
+  // sendMessage ref — lets the autopilot timer (declared earlier) always call the latest version
+  const sendMessageRef = useRef<(text: string, role?: "user" | "autopilot") => Promise<void>>(async () => {});
 
   // Ctrl+C to exit
   useInput((_input, key) => {
@@ -114,19 +101,19 @@ export default function App({
     }
   });
 
-  // Epoch change handler — resets the autopilot call budget
+  // Epoch change handler — resets the autopilot call budget when epoch rolls over
   const handleEpochChange = useCallback((newEpoch: number) => {
+    if (epochIdRef.current === newEpoch) return;
     epochIdRef.current = newEpoch;
     epochCallCountRef.current = 0;
-  }, []);
+    saveEpochBudget(agentName, { epochId: newEpoch, callCount: 0 });
+  }, [agentName]);
 
-  // Add a log entry (capped at MAX_LOG_ENTRIES)
+  // Echo autopilot activity to chat as a dimmed log line
   const addLogEntry = useCallback((action: string, detail?: string) => {
-    setAutopilotLogEntries((prev) => {
-      const entry: AutopilotLogEntry = { ts: new Date(), action, detail };
-      const next = [...prev, entry];
-      return next.length > MAX_LOG_ENTRIES ? next.slice(-MAX_LOG_ENTRIES) : next;
-    });
+    const time = formatTime(new Date());
+    const text = detail ? `⟳ ${time}  ${action} — ${detail}` : `⟳ ${time}  ${action}`;
+    setChatMessages((prev) => [...prev, { role: "log", content: text }]);
   }, []);
 
   // ── runAutopilotTurn (full mode — separate from chat) ─────────────
@@ -164,20 +151,9 @@ export default function App({
         // Parse the response — add to log
         const responseText = result.text.trim();
         if (responseText) {
-          // Extract a short summary for the log
           const firstLine = responseText.split("\n")[0].slice(0, 80);
           const detail = responseText.length > 80 ? responseText.slice(0, 120) : undefined;
           addLogEntry(firstLine, detail !== firstLine ? detail : undefined);
-
-          // If the LLM actually did something (not just "holding"), notify chat
-          const lower = responseText.toLowerCase();
-          const didAct = lower.includes("bought") || lower.includes("sold") || lower.includes("executed");
-          if (didAct) {
-            setChatMessages((prev) => [
-              ...prev,
-              { role: "assistant", content: `🤖 Autopilot: ${firstLine}` },
-            ]);
-          }
         } else {
           addLogEntry("checked → no response");
         }
@@ -215,13 +191,14 @@ export default function App({
         return;
       }
       epochCallCountRef.current += CALLS_PER_AUTOPILOT_TURN;
+      saveEpochBudget(agentName, { epochId: epochIdRef.current ?? 0, callCount: epochCallCountRef.current });
 
       const trigger = buildAutopilotTrigger(autopilotMode);
       if (!trigger) return;
 
       if (autopilotMode === "semi") {
-        // Semi: inject into chat via sendMessage path
-        void handleSubmit(trigger);
+        // Semi: inject into chat with autopilot display role
+        void sendMessageRef.current(trigger, "autopilot");
       } else {
         // Full: separate turn, results go to log only
         void runAutopilotTurn(trigger);
@@ -233,7 +210,7 @@ export default function App({
 
   // ── sendMessage ────────────────────────────────────────────────────
   const sendMessage = useCallback(
-    async (userText: string) => {
+    async (userText: string, displayRole: "user" | "autopilot" = "user") => {
       // ── Slash commands (handled locally, never sent to LLM) ────
       if (userText.startsWith("/")) {
         const parts = userText.trim().split(/\s+/);
@@ -401,7 +378,7 @@ export default function App({
 
       setChatMessages((prev) => [
         ...prev,
-        { role: "user", content: userText },
+        { role: displayRole, content: userText },
       ]);
 
       const newCoreMessages: CoreMessage[] = [
@@ -448,13 +425,13 @@ export default function App({
           updatedChat = [
             marker,
             ...recentChat,
-            { role: "user" as const, content: userText },
+            { role: displayRole, content: userText },
             { role: "assistant" as const, content: result.text },
           ];
         } else {
           updatedChat = [
             ...chatMessages,
-            { role: "user" as const, content: userText },
+            { role: displayRole, content: userText },
             { role: "assistant" as const, content: result.text },
           ];
         }
@@ -495,6 +472,8 @@ export default function App({
     },
     [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry],
   );
+  // Keep ref in sync so the autopilot timer always has the latest sendMessage
+  useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
 
   const handleSubmit = useCallback(
     (userText: string) => {
@@ -503,64 +482,37 @@ export default function App({
     [sendMessage],
   );
 
-  // ── Resize guard ──────────────────────────────────────────────────
-  if (cols < MIN_COLS || rows < MIN_ROWS) {
-    return (
-      <Box flexDirection="column" alignItems="center" justifyContent="center" width="100%" height="100%">
-        <Text color="yellow" bold>Terminal too small</Text>
-        <Text> </Text>
-        <Text>Current: {cols}×{rows}</Text>
-        <Text>Minimum: {MIN_COLS}×{MIN_ROWS}</Text>
-        <Text> </Text>
-        <Text dimColor>Resize your terminal to continue.</Text>
-      </Box>
-    );
-  }
-
-  const showLogPanel = autopilotMode !== "off";
-
   return (
     <Box flexDirection="column" width="100%" height="100%">
-      {/* TopBar: 2-row header */}
-      <Box flexShrink={0} width="100%">
-        <TopBar
-          agentName={agentName}
-          journeyStage={profile.journeyStage ?? "full"}
-          autopilotMode={autopilotMode}
-          autopilotIntervalMs={autopilotIntervalMs}
-          epochCallCount={epochCallCountRef.current}
-          onEpochChange={handleEpochChange}
-        />
+      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+        <ChatView messages={chatMessages} streamingText={streamingText} />
       </Box>
 
-      {/* Main area: Chat + optional AutopilotLog */}
-      <Box flexDirection="row" flexGrow={1} flexShrink={1}>
-        {/* Chat column */}
-        <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-          <ChatView messages={chatMessages} streamingText={streamingText} />
+      {isLoading && toolName && <Spinner label={`Calling ${toolName}...`} />}
+      {isLoading && !toolName && <Spinner label={streamingText ? "Thinking..." : undefined} />}
 
-          {isLoading && toolName && <Spinner label={`Calling ${toolName}...`} />}
-          {isLoading && !toolName && <Spinner label={streamingText ? "Thinking..." : undefined} />}
-        </Box>
-
-        {/* Autopilot log panel (visible when AP is on) */}
-        {showLogPanel && (
-          <Box flexShrink={0}>
-            <AutopilotLog entries={autopilotLogEntries} width={LOG_PANEL_WIDTH} />
-          </Box>
-        )}
-      </Box>
-
-      {/* Input */}
       <Box flexShrink={0} width="100%">
         <Input isActive={!isLoading} onSubmit={handleSubmit} />
       </Box>
 
-      {/* Footer */}
-      <Box flexShrink={0} width="100%" paddingX={2} justifyContent="space-between">
+      <Box flexShrink={0} width="100%">
+        <StatusBar
+          agentName={agentName}
+          journeyStage={profile.journeyStage ?? "full"}
+          autopilotMode={autopilotMode}
+          autopilotIntervalMs={autopilotIntervalMs}
+          onEpochChange={handleEpochChange}
+        />
+      </Box>
+
+      <Box flexShrink={0} width="100%" paddingX={2} marginTop={1} justifyContent="space-between">
         <Text dimColor>/help · /portfolio · /market · /exit</Text>
         <Text dimColor>/auto on·off·set · Ctrl+C quit</Text>
       </Box>
     </Box>
   );
+}
+
+function formatTime(d: Date): string {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }

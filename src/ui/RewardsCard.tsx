@@ -13,7 +13,7 @@ export interface RewardsData {
 }
 
 /**
- * A styled card for rewards data.
+ * A single-column list card for rewards data.
  * Rendered when MarkdownText detects a :::rewards block.
  */
 export default function RewardsCard({ data }: { data: RewardsData }): React.JSX.Element {
@@ -21,43 +21,32 @@ export default function RewardsCard({ data }: { data: RewardsData }): React.JSX.
   const epoch = data.epochAstra ? Number(data.epochAstra) / 1_000_000_000 : 0;
   const bonus = data.bonusAstra ? Number(data.bonusAstra) / 1_000_000_000 : 0;
 
-  const statusColor = data.claimStatus === "claimable" ? "green"
-    : data.claimStatus === "sent" ? "cyan"
-    : "yellow";
+  const statusColor = data.claimStatus === "claimable" ? "#00ff00"
+    : data.claimStatus === "sent" ? "#00ffff"
+    : "#ffff00";
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={2} paddingY={1} marginY={1}>
-      <Box justifyContent="center" marginBottom={1}>
-        <Text bold color="yellow">{"  $ASTRA Rewards  "}</Text>
-        {data.seasonId && <Text dimColor> — {data.seasonId}</Text>}
+    <Box flexDirection="column" paddingLeft={1} marginY={1}>
+      <Box marginBottom={1}>
+        <Text bold color="#ffff00">$ASTRA Rewards</Text>
+        {data.seasonId && <Text dimColor>  {data.seasonId}</Text>}
       </Box>
 
-      <Box flexDirection="row">
-        <Box flexDirection="column" width="50%">
-          <Row label="Total Earned" value={formatAstra(total)} color="yellow" />
-          <Row label="Epoch Rewards" value={formatAstra(epoch)} color="cyan" />
-          <Row label="Season Bonus" value={formatAstra(bonus)} color="magenta" />
-        </Box>
+      <Row label="Total Earned" value={formatAstra(total)} color="#ffff00" />
+      <Row label="Epoch Rewards" value={formatAstra(epoch)} color="#00ffff" />
+      <Row label="Season Bonus" value={formatAstra(bonus)} color="#ff00ff" />
+      <Row label="Status" value={data.claimStatus ?? "—"} color={statusColor} />
+      <Row label="Epochs Rewarded" value={data.epochsRewarded?.toString() ?? "—"} color="white" />
 
-        <Box flexDirection="column" width="50%">
-          <Row label="Status" value={data.claimStatus ?? "—"} color={statusColor} />
-          <Row label="Epochs Rewarded" value={data.epochsRewarded?.toString() ?? "—"} color="white" />
-          {data.bestEpochPnl !== undefined && data.bestEpochPnl > 0 && (
-            <Row label="Best Epoch P&L" value={`+${data.bestEpochPnl.toFixed(2)}`} color="green" />
-          )}
-        </Box>
-      </Box>
+      {data.bestEpochPnl !== undefined && data.bestEpochPnl > 0 && (
+        <Row label="Best Epoch P&L" value={`+${data.bestEpochPnl.toFixed(2)}`} color="#00ff00" />
+      )}
 
       {data.txSignature && (
-        <>
-          <Box marginTop={1}>
-            <Text dimColor>{"─".repeat(36)}</Text>
-          </Box>
-          <Box>
-            <Text dimColor>Tx: </Text>
-            <Text color="cyan">{data.txSignature}</Text>
-          </Box>
-        </>
+        <Box marginTop={1}>
+          <Text dimColor>Tx: </Text>
+          <Text color="#00ffff">{data.txSignature}</Text>
+        </Box>
       )}
     </Box>
   );

@@ -83,6 +83,11 @@ export function pendingClaimPath(agentName: string): string {
   return path.join(agentDir(agentName), "pending_claim.json");
 }
 
+/** Path to an agent's epoch budget file. */
+export function epochBudgetPath(agentName: string): string {
+  return path.join(agentDir(agentName), "epoch_budget.json");
+}
+
 /** Path to a cached remote file (e.g., skill.md). */
 export function cachePath(fileName: string): string {
   return path.join(_root(), ".cache", fileName);
