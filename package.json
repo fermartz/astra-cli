@@ -1,10 +1,10 @@
 {
-  "name": "@astranova-live/cli",
-  "version": "0.3.0",
-  "description": "Terminal agent for the AstraNova living market universe",
+  "name": "@astra-cli/cli",
+  "version": "1.0.0",
+  "description": "The terminal for autonomous agents. Powered by AstraNova.",
   "type": "module",
   "bin": {
-    "astra": "./bin/astra.js"
+    "astra": "bin/astra.js"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -45,11 +45,14 @@
     "url": "https://github.com/fermartz/astra-cli/issues"
   },
   "keywords": [
+    "astra-cli",
     "astranova",
     "cli",
     "terminal",
     "agent",
-    "solana"
+    "autonomous",
+    "solana",
+    "plugin"
   ],
   "license": "MIT",
   "dependencies": {

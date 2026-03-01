@@ -2,6 +2,18 @@
 
 All notable changes to Astra CLI are documented here.
 
+## [1.0.0] — 2026-03-01
+
+- Rebranded from `@astranova-live/cli` to `@astra-cli/cli`
+- Astra CLI is now the terminal for autonomous agents — AstraNova bundled by default, other apps pluggable via `astra add <url>` (coming soon)
+- All functionality from v0.3.1 included
+
+## [0.3.1] — 2026-03-01
+
+- Fix `/strategy` command not recognized ("Unknown command" error)
+- Fix `/strategy setup` and bare `/strategy` showing rewritten LLM prompt as user message instead of the command
+- Fix `/strategy <unknown subcommand>` silently passing raw text to LLM — now shows usage hint
+
 ## [0.3.0] — 2026-03-01
 
 ### Trading Strategy System

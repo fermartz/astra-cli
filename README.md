@@ -38,10 +38,10 @@ Astra CLI is the open-source terminal client. It connects your chosen LLM to the
 
 ```bash
 # Run directly (no install)
-npx @astranova-live/cli
+npx @astra-cli/cli
 
 # Or install globally
-npm i -g @astranova-live/cli
+npm i -g @astra-cli/cli
 astra
 
 # Resume your last session
