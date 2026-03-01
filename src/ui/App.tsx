@@ -14,7 +14,6 @@ import {
   buildAutopilotTrigger,
   formatInterval,
   parseInterval,
-  CALLS_PER_AUTOPILOT_TURN,
   EPOCH_BUDGET,
   BUDGET_BUFFER,
 } from "../autopilot/scheduler.js";
@@ -185,13 +184,13 @@ export default function App({
       // Skip if a turn is already running
       if (isLoadingRef.current) return;
 
-      // Budget check
-      if (epochCallCountRef.current + CALLS_PER_AUTOPILOT_TURN > EPOCH_BUDGET - BUDGET_BUFFER) {
+      // Budget check — count only actual trades, read from disk for accuracy
+      const budget = loadEpochBudget(agentName);
+      const tradeCount = budget?.callCount ?? 0;
+      if (tradeCount >= EPOCH_BUDGET - BUDGET_BUFFER) {
         addLogEntry("Budget reached — skipping until next epoch");
         return;
       }
-      epochCallCountRef.current += CALLS_PER_AUTOPILOT_TURN;
-      saveEpochBudget(agentName, { epochId: epochIdRef.current ?? 0, callCount: epochCallCountRef.current });
 
       const trigger = buildAutopilotTrigger(autopilotMode);
       if (!trigger) return;
@@ -242,7 +241,8 @@ export default function App({
           if (!sub || sub === "status") {
             const modeLabel = autopilotMode.toUpperCase();
             const intervalLabel = formatInterval(autopilotIntervalMs);
-            const budgetLabel = `${epochCallCountRef.current}/${EPOCH_BUDGET}`;
+            const tradeCount = loadEpochBudget(agentName)?.callCount ?? 0;
+            const budgetLabel = `${tradeCount}/${EPOCH_BUDGET}`;
             setChatMessages((prev) => [
               ...prev,
               { role: "user", content: userText },

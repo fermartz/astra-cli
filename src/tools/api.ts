@@ -7,6 +7,8 @@ import {
   savePendingClaim,
   loadPendingClaim,
   clearPendingClaim,
+  loadEpochBudget,
+  saveEpochBudget,
 } from "../config/store.js";
 
 const DEBUG = !!process.env.ASTRA_DEBUG;
@@ -193,6 +195,12 @@ export const apiCallTool = tool({
     // Auto-track board post flag
     if (method === "POST" && path === "/api/v1/board" && agentName) {
       markBoardPosted(agentName);
+    }
+
+    // Track trade executions against epoch budget (buy/sell only)
+    if (method === "POST" && path.startsWith("/api/v1/trades") && agentName) {
+      const budget = loadEpochBudget(agentName) ?? { epochId: 0, callCount: 0 };
+      saveEpochBudget(agentName, { ...budget, callCount: budget.callCount + 1 });
     }
 
     return result.data;
