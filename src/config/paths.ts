@@ -88,6 +88,21 @@ export function epochBudgetPath(agentName: string): string {
   return path.join(agentDir(agentName), "epoch_budget.json");
 }
 
+/** Path to an agent's trading strategy file. */
+export function strategyPath(agentName: string): string {
+  return path.join(agentDir(agentName), "strategy.md");
+}
+
+/** Path to an agent's autopilot trade log (NDJSON). */
+export function autopilotLogPath(agentName: string): string {
+  return path.join(agentDir(agentName), "autopilot.log");
+}
+
+/** Path to an agent's daemon PID file. */
+export function daemonPidPath(agentName: string): string {
+  return path.join(agentDir(agentName), "daemon.pid");
+}
+
 /** Path to a cached remote file (e.g., skill.md). */
 export function cachePath(fileName: string): string {
   return path.join(_root(), ".cache", fileName);

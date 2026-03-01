@@ -76,6 +76,8 @@ On first run, the onboarding wizard walks you through:
 ## Features
 
 - **Conversational trading** — chat naturally, the agent handles API calls
+- **Autonomous autopilot** — set a trading strategy and let the agent trade on a timer (semi: while TUI is open; full: background daemon that runs even after you close the terminal)
+- **Trading strategy** — guided LLM conversation creates a strategy stored per-agent; used during autopilot ticks
 - **Session persistence** — resume conversations with `astra -c` (last 100 messages, 7-day window)
 - **Persistent memory** — the agent remembers your preferences across sessions
 - **Context compaction** — long conversations are automatically summarized to stay within LLM limits
@@ -103,12 +105,17 @@ All data is stored in `~/.config/astranova/` with restricted permissions:
 ~/.config/astranova/
 ├── config.json              # LLM provider, model, auth (chmod 600)
 ├── active_agent             # Current agent name
+├── state.json               # Per-agent state (journey stage, autopilot config)
 ├── audit.log                # Tool call audit trail
 ├── .cache/                  # Remote context cache (24h TTL)
 └── agents/<agent-name>/
     ├── credentials.json     # API key (chmod 600)
     ├── wallet.json          # Solana keypair (chmod 600)
     ├── memory.md            # Persistent agent memory
+    ├── strategy.md          # Trading strategy (used by autopilot)
+    ├── autopilot.log        # Autopilot trade log (NDJSON)
+    ├── daemon.pid           # Background daemon PID (full autopilot)
+    ├── epoch_budget.json    # Epoch trade counter (resets each epoch)
     └── sessions/            # Conversation sessions (last 3 kept)
 ```
 
@@ -128,6 +135,8 @@ The LLM has access to these tools (no shell execution, no arbitrary file access)
 | `register_agent` | Register a new agent via API |
 | `switch_agent` | Switch between local agents |
 | `list_agents` | List all local agents |
+| `write_strategy` | Save a trading strategy to disk (max 4000 chars) |
+| `read_strategy` | Read the current trading strategy from disk |
 
 ## Slash Commands
 
@@ -141,6 +150,13 @@ The LLM has access to these tools (no shell execution, no arbitrary file access)
 | `/wallet` | Check wallet status |
 | `/buy <amt>` | Buy $NOVA (e.g. `/buy 500`) |
 | `/sell <amt>` | Sell $NOVA (e.g. `/sell 200`) |
+| `/strategy` | Execute a one-shot trade based on strategy (or start guided setup if none) |
+| `/strategy setup` | View and edit or replace your trading strategy |
+| `/strategy status` | Print your current strategy without executing |
+| `/auto semi [interval]` | Enable autopilot while TUI is open (e.g. `/auto semi 5m`) |
+| `/auto full [interval]` | Enable full autopilot daemon — trades even when TUI is closed |
+| `/auto off` | Disable autopilot and stop background daemon |
+| `/auto report` | Show recent autopilot log entries |
 | `/compact` | Summarize conversation to free context |
 | `/help` | Show available commands |
 | `/exit` | Exit (also `/quit`, `/q`) |
@@ -207,7 +223,7 @@ node dist/astra.js
 
 ## Roadmap
 
-- [x] Multi-provider LLM support (Claude, Codex OAuth)
+- [x] Multi-provider LLM support (Claude, Codex OAuth, OpenAI API, Gemini)
 - [x] Agent registration and X/Twitter verification
 - [x] Trading ($NOVA buy/sell with $SIM)
 - [x] Solana wallet generation and on-chain reward claims
@@ -217,8 +233,9 @@ node dist/astra.js
 - [x] Audit logging
 - [x] Context compaction (summarize long conversations)
 - [x] Pending claim recovery (resilient reward claiming)
+- [x] Autopilot trading — semi (TUI) and full (background daemon)
+- [x] Trading strategy system — guided creation, per-agent storage, one-shot execution
 - [ ] Market heartbeat (proactive price notifications)
-- [x] OpenAI API and Gemini providers
 - [ ] Ollama (local models)
 - [ ] Provider switching mid-session
 

@@ -6,17 +6,20 @@ import ChatView, { type ChatMessage } from "./ChatView.js";
 import Input from "./Input.js";
 import Spinner from "./Spinner.js";
 import { runAgentTurn } from "../agent/loop.js";
-import { isRestartRequested, loadConfig, saveAutopilotConfig, loadEpochBudget, saveEpochBudget } from "../config/store.js";
+import { isRestartRequested, loadConfig, saveAutopilotConfig, loadEpochBudget, saveEpochBudget, appendAutopilotLog, loadAutopilotLogSince } from "../config/store.js";
 import { saveSession } from "../config/sessions.js";
 import type { AgentProfile } from "../agent/system-prompt.js";
 import type { AutopilotConfig } from "../autopilot/scheduler.js";
 import {
   buildAutopilotTrigger,
+  buildStrategyRunTrigger,
   formatInterval,
   parseInterval,
   EPOCH_BUDGET,
   BUDGET_BUFFER,
 } from "../autopilot/scheduler.js";
+import { loadStrategy } from "../tools/strategy.js";
+import { startDaemon, stopDaemon } from "../daemon/daemon-manager.js";
 
 
 interface AppProps {
@@ -33,6 +36,8 @@ interface AppProps {
   initialCoreMessages?: CoreMessage[];
   initialChatMessages?: Array<{ role: string; content: string }>;
   initialAutopilotConfig?: AutopilotConfig;
+  /** Number of autopilot trades made since the last session (full mode, TUI was closed). */
+  initialPendingTrades?: number;
   debug?: boolean;
 }
 
@@ -50,6 +55,7 @@ export default function App({
   initialCoreMessages,
   initialChatMessages,
   initialAutopilotConfig,
+  initialPendingTrades = 0,
   debug,
 }: AppProps): React.JSX.Element {
   const { exit } = useApp();
@@ -85,6 +91,21 @@ export default function App({
     }
   }, [agentName]);
 
+  // Notify user of trades made while TUI was closed (full autopilot daemon)
+  useEffect(() => {
+    if (initialPendingTrades > 0) {
+      const count = initialPendingTrades;
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant" as const,
+          content: `Hey! Autopilot made **${count}** trade${count > 1 ? "s" : ""} while you were away. Type \`/auto report\` to see what happened.`,
+        },
+      ]);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount only
+
   // Refs for autopilot timer closure stability
   const coreMessagesRef = useRef(coreMessages);
   useEffect(() => { coreMessagesRef.current = coreMessages; }, [coreMessages]);
@@ -115,9 +136,11 @@ export default function App({
     setChatMessages((prev) => [...prev, { role: "log", content: text }]);
   }, []);
 
-  // ── runAutopilotTurn (full mode — separate from chat) ─────────────
+  // ── runAutopilotTurn — autonomous execution (semi + full) ──────────
+  // displayMode "chat": result shown as assistant message in chat (semi)
+  // displayMode "log":  result shown as dim log line + written to autopilot.log (full)
   const runAutopilotTurn = useCallback(
-    async (triggerMsg: string) => {
+    async (triggerMsg: string, displayMode: "chat" | "log" = "log") => {
       const currentCore = coreMessagesRef.current;
       const newCoreMessages: CoreMessage[] = [
         ...currentCore,
@@ -136,9 +159,9 @@ export default function App({
           apiContext,
           { ...profile, autopilotMode },
           {
-            onTextChunk: () => {},
-            onToolCallStart: () => {},
-            onToolCallEnd: () => {},
+            onTextChunk: displayMode === "chat" ? (chunk) => { setStreamingText((prev) => (prev ?? "") + chunk); } : () => {},
+            onToolCallStart: displayMode === "chat" ? (name) => { setToolName(name); } : () => {},
+            onToolCallEnd: displayMode === "chat" ? () => { setToolName(undefined); } : () => {},
           },
           memoryContent,
         );
@@ -147,14 +170,20 @@ export default function App({
         const updatedCore = [...baseCoreMessages, ...result.responseMessages];
         setCoreMessages(updatedCore);
 
-        // Parse the response — add to log
         const responseText = result.text.trim();
-        if (responseText) {
-          const firstLine = responseText.split("\n")[0].slice(0, 80);
-          const detail = responseText.length > 80 ? responseText.slice(0, 120) : undefined;
-          addLogEntry(firstLine, detail !== firstLine ? detail : undefined);
+
+        if (displayMode === "chat") {
+          // Semi: show result as regular assistant message in chat
+          setStreamingText(undefined);
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant" as const, content: responseText || "Market checked — holding." },
+          ]);
         } else {
-          addLogEntry("checked → no response");
+          // Full: dim log line in chat + persist to autopilot.log
+          const summary = responseText.split("\n")[0].slice(0, 120) || "checked → no response";
+          addLogEntry(summary);
+          appendAutopilotLog(agentName, { ts: new Date().toISOString(), action: summary });
         }
 
         // Persist session
@@ -168,9 +197,15 @@ export default function App({
         });
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Unknown error";
-        addLogEntry("error", message);
+        if (displayMode === "chat") {
+          setStreamingText(undefined);
+          setChatMessages((prev) => [...prev, { role: "assistant" as const, content: `Autopilot error: ${message}` }]);
+        } else {
+          addLogEntry("error", message);
+        }
       } finally {
         setIsLoading(false);
+        if (displayMode === "chat") setToolName(undefined);
       }
     },
     [skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry],
@@ -192,15 +227,17 @@ export default function App({
         return;
       }
 
-      const trigger = buildAutopilotTrigger(autopilotMode);
+      // Load strategy fresh at tick time and embed in trigger
+      const strategy = loadStrategy(agentName);
+      const trigger = buildAutopilotTrigger(autopilotMode, strategy);
       if (!trigger) return;
 
       if (autopilotMode === "semi") {
-        // Semi: inject into chat with autopilot display role
-        void sendMessageRef.current(trigger, "autopilot");
+        // Semi: autonomous execution, result shown in chat
+        void runAutopilotTurn(trigger, "chat");
       } else {
-        // Full: separate turn, results go to log only
-        void runAutopilotTurn(trigger);
+        // Full: autonomous execution, result in log only
+        void runAutopilotTurn(trigger, "log");
       }
     }, autopilotIntervalMs);
 
@@ -252,30 +289,62 @@ export default function App({
           }
 
           if (sub === "on" || sub === "semi") {
+            stopDaemon(agentName); // stop full daemon if switching from full mode
             setAutopilotMode("semi");
             saveAutopilotConfig({ mode: "semi", intervalMs: autopilotIntervalMs });
+            const hasStrat = !!loadStrategy(agentName);
             setChatMessages((prev) => [
               ...prev,
               { role: "user", content: userText },
-              { role: "assistant", content: `Autopilot enabled: **SEMI** mode (every ${formatInterval(autopilotIntervalMs)}). I'll propose trades for your approval.` },
+              { role: "assistant", content: `Autopilot enabled: **SEMI** mode (every ${formatInterval(autopilotIntervalMs)}). I'll execute trades automatically based on your strategy.${!hasStrat ? "\n\n⚠️ No strategy set yet — I'll use general momentum signals. Use `/strategy setup` to create one." : ""}` },
             ]);
             addLogEntry("Mode set to SEMI");
             return;
           }
 
           if (sub === "full") {
+            const strategy = loadStrategy(agentName);
+            if (!strategy) {
+              setChatMessages((prev) => [
+                ...prev,
+                { role: "user", content: userText },
+                { role: "assistant", content: "You need a trading strategy before enabling full autopilot. Use `/strategy setup` to create one." },
+              ]);
+              return;
+            }
             setAutopilotMode("full");
             saveAutopilotConfig({ mode: "full", intervalMs: autopilotIntervalMs });
+            startDaemon(agentName);
             setChatMessages((prev) => [
               ...prev,
               { role: "user", content: userText },
-              { role: "assistant", content: `Autopilot enabled: **FULL** mode (every ${formatInterval(autopilotIntervalMs)}). I'll execute trades autonomously — check the log panel.` },
+              { role: "assistant", content: `Autopilot enabled: **FULL** mode (every ${formatInterval(autopilotIntervalMs)}). I'll execute trades autonomously based on your strategy — even when you close the app.` },
             ]);
-            addLogEntry("Mode set to FULL");
+            addLogEntry("Mode set to FULL — daemon started");
+            return;
+          }
+
+          if (sub === "report") {
+            const entries = loadAutopilotLogSince(agentName, null);
+            if (entries.length === 0) {
+              setChatMessages((prev) => [
+                ...prev,
+                { role: "user", content: userText },
+                { role: "assistant", content: "No autopilot trades logged yet." },
+              ]);
+            } else {
+              const lines = entries.slice(-20).map((e) => `\`${e.ts.slice(11, 16)}\` ${e.action}`);
+              setChatMessages((prev) => [
+                ...prev,
+                { role: "user", content: userText },
+                { role: "assistant", content: `**Autopilot log** (last ${lines.length} entries):\n\n${lines.join("\n")}` },
+              ]);
+            }
             return;
           }
 
           if (sub === "off") {
+            stopDaemon(agentName); // no-op if not running
             setAutopilotMode("off");
             saveAutopilotConfig({ mode: "off", intervalMs: autopilotIntervalMs });
             setChatMessages((prev) => [
@@ -313,6 +382,45 @@ export default function App({
           return;
         }
 
+        // ── /strategy slash commands ────
+        if (cmd === "/strategy") {
+          const sub = parts[1]?.toLowerCase();
+
+          if (sub === "status") {
+            const strategy = loadStrategy(agentName);
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              strategy
+                ? { role: "assistant", content: `**Your current strategy:**\n\n${strategy}` }
+                : { role: "assistant", content: "No strategy set up yet. Use `/strategy setup` to create one." },
+            ]);
+            return;
+          }
+
+          if (sub === "setup") {
+            // Show existing strategy (if any) and let LLM guide edit/create
+            const existing = loadStrategy(agentName);
+            userText = existing
+              ? `I want to review and update my trading strategy. Here it is:\n\n${existing}\n\nLet's go through it and improve or replace it.`
+              : "I want to create a trading strategy. Please guide me through the options.";
+            // Fall through to LLM
+          } else if (!sub) {
+            // No subcommand: one-shot run if strategy exists, else guide creation
+            const strategy = loadStrategy(agentName);
+            if (strategy) {
+              const trigger = buildStrategyRunTrigger(strategy);
+              setChatMessages((prev) => [...prev, { role: "user", content: "/strategy" }]);
+              void runAutopilotTurn(trigger, "chat");
+              return;
+            }
+            // No strategy — guide creation
+            userText = "I want to create a trading strategy. Please guide me through the options.";
+            // Fall through to LLM
+          }
+          // Fall through to LLM for setup/creation flows
+        }
+
         if (cmd === "/help" || cmd === "/?") {
           setChatMessages((prev) => [
             ...prev,
@@ -331,13 +439,17 @@ export default function App({
                 "  `/buy <amt>` — Buy $NOVA (e.g. `/buy 500`)",
                 "  `/sell <amt>`— Sell $NOVA (e.g. `/sell 200`)",
                 "",
-                "**Autopilot**",
+                "**Strategy & Autopilot**",
                 "",
-                "  `/auto on`     — Enable semi-auto mode",
-                "  `/auto full`   — Enable full-auto mode",
-                "  `/auto off`    — Disable autopilot",
-                "  `/auto 5m`     — Set interval (1m-60m)",
-                "  `/auto status` — Show autopilot status",
+                "  `/strategy`        — Run strategy once (or create if none)",
+                "  `/strategy setup`  — Create or edit your strategy",
+                "  `/strategy status` — View current strategy",
+                "  `/auto on`         — Enable semi-auto mode",
+                "  `/auto full`       — Enable full-auto mode (requires strategy)",
+                "  `/auto off`        — Disable autopilot",
+                "  `/auto 5m`         — Set interval (1m-60m)",
+                "  `/auto status`     — Show autopilot status",
+                "  `/auto report`     — Show autopilot trade log",
                 "",
                 "**System**",
                 "",
@@ -506,7 +618,7 @@ export default function App({
       </Box>
 
       <Box flexShrink={0} width="100%" paddingX={2} marginTop={1} justifyContent="space-between">
-        <Text dimColor>/help · /portfolio · /market · /exit</Text>
+        <Text dimColor>/help · /portfolio · /market · /strategy · /exit</Text>
         <Text dimColor>/auto on·off·set · Ctrl+C quit</Text>
       </Box>
     </Box>

@@ -29,12 +29,13 @@ export const ConfigSchema = z.object({
       theme: z.enum(["dark", "light"]).default("dark"),
     })
     .default({}),
+  // Kept as optional for backward compat — autopilot config is now per-agent in state.json.
   autopilot: z
     .object({
       mode: z.enum(["off", "semi", "full"]).default("off"),
       intervalMs: z.number().min(60000).max(3600000).default(300000),
     })
-    .default({ mode: "off", intervalMs: 300000 }),
+    .optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -85,6 +86,17 @@ export const RegisterResponseSchema = z.object({
 export type RegisterResponse = z.infer<typeof RegisterResponseSchema>;
 
 /**
+ * Per-agent autopilot config — stored inside state.json per agent.
+ * Kept separate so each agent has independent autopilot settings.
+ */
+export const AgentAutopilotSchema = z.object({
+  mode: z.enum(["off", "semi", "full"]).default("off"),
+  intervalMs: z.number().min(60000).max(3600000).default(300000),
+});
+
+export type AgentAutopilot = z.infer<typeof AgentAutopilotSchema>;
+
+/**
  * Per-agent metadata stored in state.json.
  */
 export const AgentStateSchema = z.object({
@@ -92,6 +104,7 @@ export const AgentStateSchema = z.object({
   journeyStage: z.enum(["fresh", "pending", "verified", "trading", "wallet_ready", "full"]).default("fresh"),
   createdAt: z.string().default(() => new Date().toISOString()),
   verificationCode: z.string().optional(),
+  autopilot: AgentAutopilotSchema.optional(),
 });
 
 export type AgentState = z.infer<typeof AgentStateSchema>;

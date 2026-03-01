@@ -15,6 +15,7 @@ import {
   isRestartRequested,
   clearRestartFlag,
   loadAutopilotConfig,
+  loadAutopilotLogSince,
 } from "../config/store.js";
 import { ensureBaseStructure } from "../config/paths.js";
 import { runOnboarding } from "../onboarding/index.js";
@@ -24,6 +25,8 @@ import { getSkillContext, fetchRemoteContext } from "../remote/skill.js";
 import type { AgentProfile } from "../agent/system-prompt.js";
 import { loadLatestSession, pruneOldSessions, newSessionId } from "../config/sessions.js";
 import { loadMemory } from "../tools/memory.js";
+import { loadStrategy } from "../tools/strategy.js";
+import { runDaemon } from "../daemon/autopilot-worker.js";
 import App from "../ui/App.js";
 
 /**
@@ -62,15 +65,22 @@ function detectJourneyStage(params: {
 async function main(): Promise<void> {
   ensureBaseStructure();
 
-  // Clear any stale restart flag from a previous session that wasn't consumed
-  if (isRestartRequested()) {
-    clearRestartFlag();
-  }
-
   // Parse CLI args
   const args = process.argv.slice(2);
   const shouldContinue = args.includes("--continue") || args.includes("-c");
   const debug = args.includes("--debug") || args.includes("-d");
+  const isDaemonMode = args.includes("--daemon");
+
+  // Daemon mode — skip onboarding + TUI, run background worker
+  if (isDaemonMode) {
+    await runDaemon();
+    return;
+  }
+
+  // Clear any stale restart flag from a previous session that wasn't consumed
+  if (isRestartRequested()) {
+    clearRestartFlag();
+  }
 
   // Activate debug logging in agent loop when --debug flag is set
   if (debug) {
@@ -159,6 +169,8 @@ async function main(): Promise<void> {
     verificationCode: onboardingResult?.verificationCode ?? apiStatus?.verificationCode,
   });
 
+  const hasStrategy = !!loadStrategy(agentName);
+
   const profile: AgentProfile = {
     agentName,
     status: apiStatus?.status ?? (isNewAgent ? "pending_verification" : "active"),
@@ -169,6 +181,7 @@ async function main(): Promise<void> {
     isNewAgent,
     boardPosted,
     journeyStage: stage,
+    hasStrategy,
   };
 
   // Step 7: Session resume + memory
@@ -193,8 +206,15 @@ async function main(): Promise<void> {
     }
   }
 
-  // Step 8: Load autopilot config
+  // Step 8: Load autopilot config + check for pending daemon trades
   const initialAutopilotConfig = loadAutopilotConfig();
+
+  // Count trades logged by the full autopilot daemon since the last session
+  const lastSessionAt = shouldContinue
+    ? (() => { const s = loadLatestSession(agentName); return s ? new Date(s.updatedAt) : null; })()
+    : null;
+  const pendingTrades = loadAutopilotLogSince(agentName, lastSessionAt);
+  const initialPendingTrades = pendingTrades.length;
 
   // Step 9: Launch Ink TUI
   const { waitUntilExit } = render(
@@ -212,6 +232,7 @@ async function main(): Promise<void> {
       initialCoreMessages,
       initialChatMessages,
       initialAutopilotConfig,
+      initialPendingTrades,
       debug,
     }),
   );

@@ -12,13 +12,7 @@ export interface AutopilotConfig {
   intervalMs: number;
 }
 
-export interface AutopilotLogEntry {
-  ts: Date;
-  action: string;
-  detail?: string;
-}
-
-/** Maximum autopilot log entries kept in memory. */
+/** Maximum in-memory autopilot log entries (UI display only). */
 export const MAX_LOG_ENTRIES = 100;
 
 /** API calls budgeted per autopilot turn (market + portfolio + potential trade). */
@@ -31,29 +25,38 @@ export const EPOCH_BUDGET = 10;
 export const BUDGET_BUFFER = 2;
 
 /**
- * Semi-autopilot trigger — injected into chat via sendMessage().
- * The LLM sees this in the conversation and proposes a trade for user approval.
+ * Base trigger for semi autopilot — autonomous execution, no user confirmation.
+ * Strategy content is appended by buildAutopilotTrigger() when available.
  */
-export const SEMI_TRIGGER_MSG =
-  "AUTOPILOT CHECK: Analyze market and propose a trade if signal is clear. Ask me to confirm before executing.";
+const SEMI_TRIGGER_BASE =
+  "AUTOPILOT CHECK (SEMI): Analyze market and execute a trade based on your strategy. Do NOT ask for confirmation — execute autonomously and report the result in 2-3 lines. If conditions are not met, say 'Market checked — holding.' with a brief reason.";
 
 /**
- * Full-autopilot trigger — injected into coreMessages only (not chat).
- * The LLM executes trades autonomously; results go to the autopilot log.
+ * Base trigger for full autopilot — fully autonomous, result goes to log only.
+ * Strategy content is appended by buildAutopilotTrigger() when available.
  */
-export const FULL_TRIGGER_MSG =
-  "AUTOPILOT CHECK: Analyze market and execute a trade if signal is clear. If uncertain, skip. Keep response to 2-3 lines max.";
+const FULL_TRIGGER_BASE =
+  "AUTOPILOT CHECK (FULL): Analyze market and execute a trade based on your strategy. Do NOT ask for confirmation. Do NOT ask about trade size — use position sizing from your strategy. Execute immediately if conditions are met, skip if uncertain. Keep response to 2-3 lines max.";
 
-/** Build the appropriate trigger message for the given mode. Returns null for "off". */
-export function buildAutopilotTrigger(mode: AutopilotMode): string | null {
-  switch (mode) {
-    case "semi":
-      return SEMI_TRIGGER_MSG;
-    case "full":
-      return FULL_TRIGGER_MSG;
-    case "off":
-      return null;
-  }
+/**
+ * One-shot trigger for the /strategy slash command.
+ * Strategy content is appended by buildStrategyRunTrigger() when available.
+ */
+const STRATEGY_RUN_BASE =
+  "STRATEGY RUN: Check the market against your strategy and execute a trade if conditions are met. Do NOT ask for confirmation. Report what you did (or why you held) in 2-3 lines.";
+
+/** Build the trigger message for a timed autopilot tick. Embeds strategy inline when provided. */
+export function buildAutopilotTrigger(mode: AutopilotMode, strategyContent?: string): string | null {
+  const base = mode === "semi" ? SEMI_TRIGGER_BASE : mode === "full" ? FULL_TRIGGER_BASE : null;
+  if (!base) return null;
+  if (!strategyContent?.trim()) return base;
+  return `${base}\n\n## Your Strategy\n${strategyContent.trim()}`;
+}
+
+/** Build the trigger message for a one-shot /strategy run. Embeds strategy inline when provided. */
+export function buildStrategyRunTrigger(strategyContent?: string): string {
+  if (!strategyContent?.trim()) return STRATEGY_RUN_BASE;
+  return `${STRATEGY_RUN_BASE}\n\n## Your Strategy\n${strategyContent.trim()}`;
 }
 
 /** Format an interval in ms to a human-readable string like "5m" or "30m". */

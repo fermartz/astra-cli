@@ -11,6 +11,7 @@ import {
   listAgentsTool,
 } from "./agent-management.js";
 import { updateMemoryTool } from "./memory.js";
+import { readStrategyTool, writeStrategyTool } from "./strategy.js";
 
 /**
  * All available tools for the agent loop.
@@ -27,4 +28,6 @@ export const astraTools = {
   switch_agent: switchAgentTool,
   list_agents: listAgentsTool,
   update_memory: updateMemoryTool,
+  read_strategy: readStrategyTool,
+  write_strategy: writeStrategyTool,
 };

@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import type { AutopilotLogEntry } from "../autopilot/scheduler.js";
+import type { AutopilotLogEntry } from "../config/store.js";
 
 interface AutopilotLogProps {
   entries: AutopilotLogEntry[];
@@ -31,7 +31,7 @@ export default function AutopilotLog({
       )}
 
       {visible.map((entry, i) => {
-        const time = formatTime(entry.ts);
+        const time = formatTime(new Date(entry.ts));
         return (
           <Box key={i} flexDirection="column">
             <Box>

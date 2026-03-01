@@ -2,6 +2,55 @@
 
 All notable changes to Astra CLI are documented here.
 
+## [0.3.0] — 2026-03-01
+
+### Trading Strategy System
+- Add `write_strategy` and `read_strategy` tools — LLM creates a guided trading strategy stored as `strategy.md` per-agent
+- Strategy is injected only into autopilot trigger messages (lean context — never in system prompt)
+- Journey nudge: in `trading` stage, agent mentions autopilot once if no strategy exists
+- `/strategy` — execute a one-shot trade based on current strategy (or start guided creation if none)
+- `/strategy setup` — show existing strategy and offer to update or replace it
+- `/strategy status` — print strategy inline without executing
+
+### Autonomous Autopilot (Phase 2)
+- **Semi mode fix**: now fully autonomous — no user confirmation required, result streamed as assistant message
+- **Full mode**: implemented as a detached background daemon (`--daemon` process) that keeps trading even when TUI is closed
+- `/auto full` requires a strategy to be set first — blocked with guidance if none exists
+- `/auto report` — show recent autopilot log entries inline in chat
+- On TUI open: if daemon made trades since last session, prompts user for a report
+
+### Background Daemon
+- Daemon process spawned via `node dist/astra.js --daemon` — detached, survives TUI exit
+- PID stored in `agents/<name>/daemon.pid`; stale PIDs cleaned up automatically
+- Daemon handles SIGTERM for clean shutdown
+- Each daemon tick: loads strategy fresh, checks epoch budget, calls `runAgentTurn()`, appends result to `autopilot.log`
+
+### Agent Isolation
+- Autopilot config moved from global `config.json` to per-agent `state.json` — no config bleeding on agent switch
+- Each agent has its own `strategy.md`, `autopilot.log`, and `daemon.pid` under `agents/<name>/`
+- On agent switch or register: running daemon for old agent is stopped before restart
+
+### New local files per agent
+- `strategy.md` — trading strategy (max 4000 chars, chmod 600)
+- `autopilot.log` — NDJSON trade log (one entry per tick)
+- `daemon.pid` — daemon process ID for full autopilot
+
+## [0.2.8] — 2026-03-01
+
+- Rename "Val" to "Net" in status bar (net worth display)
+
+## [0.2.7] — 2026-02-28
+
+- Fix autopilot epoch budget to count trades only (not all tool calls)
+
+## [0.2.6] — 2026-02-28
+
+- Autopilot trading: semi and full modes with epoch call budget (10 trades/epoch)
+- Epoch-aware budget persistence (`epoch_budget.json`) — survives TUI restarts and resets on epoch change
+- Autopilot semi-mode messages render with magenta `Autopilot` label and dimmed command text
+- TUI color upgrade: all named ANSI colors replaced with explicit hex values for true terminal contrast
+- Agent name in status bar uses `#ff8800` (classic orange)
+
 ## [0.2.5] — 2026-02-28
 
 - Fix claim auto-flow: all 3 steps now execute in a single turn without pausing

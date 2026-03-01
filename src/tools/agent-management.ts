@@ -12,6 +12,7 @@ import {
   loadCredentials,
   requestRestart,
 } from "../config/store.js";
+import { stopDaemon } from "../daemon/daemon-manager.js";
 
 /**
  * register_agent tool — registers a new agent with the AstraNova API.
@@ -54,6 +55,12 @@ export const registerAgentTool = tool({
 
     if (!data.api_key) {
       return { error: "Registration response missing api_key. Something went wrong." };
+    }
+
+    // Stop current agent's daemon before switching to the new agent
+    const currentAgent = getActiveAgent();
+    if (currentAgent) {
+      stopDaemon(currentAgent);
     }
 
     // Save credentials
@@ -116,6 +123,11 @@ export const switchAgentTool = tool({
         message: `"${agentName}" is already the active agent.`,
         agentName,
       };
+    }
+
+    // Stop daemon for the current agent before switching (new agent starts clean)
+    if (currentAgent) {
+      stopDaemon(currentAgent);
     }
 
     setActiveAgent(agentName);

@@ -13,6 +13,8 @@ export interface AgentProfile {
   boardPosted?: boolean;
   journeyStage?: JourneyStage;
   autopilotMode?: "off" | "semi" | "full";
+  /** Whether a trading strategy exists on disk — used for journey nudge only. */
+  hasStrategy?: boolean;
 }
 
 /**
@@ -116,21 +118,15 @@ export function buildSystemPrompt(
     parts.push(`Season: ${profile.season}`);
   }
 
-  // Inject autopilot instructions when active
+  // Inject autopilot mode indicator when active (lean — strategy is in trigger message, not here)
   const apMode = profile.autopilotMode ?? "off";
   if (apMode !== "off") {
     parts.push("", "---", "");
     parts.push(`## AUTOPILOT: ${apMode.toUpperCase()}`);
     parts.push("");
-    parts.push(`On AUTOPILOT CHECK triggers:`);
-    parts.push(`- GET /api/v1/market/state + GET /api/v1/portfolio`);
-    parts.push(`- Apply strategy from memory.md (default: momentum + balance)`);
-    if (apMode === "semi") {
-      parts.push(`- SEMI: propose trade, wait for explicit user approval`);
-    } else {
-      parts.push(`- FULL: execute if signal clear; skip if uncertain`);
-    }
-    parts.push(`- Max 2-3 lines. No action = "Market checked — holding."`);
+    parts.push(
+      `Autopilot is active. When you receive an AUTOPILOT CHECK trigger, your strategy will be included in that message — execute per those instructions. Do NOT ask the user for confirmation or trade size during autopilot checks.`,
+    );
   }
 
   // Inject persistent memory if available
@@ -191,7 +187,10 @@ If they trade, pull their portfolio afterwards using the card format and add a b
 - If they ask what they can do, give them 2-3 quick options: "Check the market, make a trade, or look at the board."`;
     }
 
-    case "trading":
+    case "trading": {
+      const strategyNudge = !profile.hasStrategy
+        ? `- If it comes up naturally, mention autopilot once: "By the way — I can trade on autopilot for you if you set up a strategy. Want to try?" Only mention once per session. If they say no or ignore it, drop it.\n`
+        : "";
       return `## Your Opening Message
 
 Welcome back! Greet the user casually: "Hey! Want to see what the market's been up to?"
@@ -205,13 +204,14 @@ Wait for their response. Don't auto-pull data unless they say yes or ask for som
 - After the user makes their 3rd trade OR after you've shown them the portfolio at least once, casually mention wallet setup once: "By the way — setting up a wallet takes about a minute and means your $ASTRA rewards are claimable the moment the season ends. Want to do it now?"
 - If portfolio shows claimable rewards (rewards.claimable > "0"), always mention wallet setup regardless of trade count: "You've got $ASTRA rewards ready to claim — want to set up a wallet so you can collect them?"
 - Only mention wallet setup once per session. If they say no or ignore it, drop it.
-
+${strategyNudge}
 **Wallet setup:** If they say yes, run the full wallet flow automatically (create → challenge → sign → register → verify) — tell them what you're doing along the way but don't stop to ask at each step.
 
 **Conversation style:**
 - Like a friend who's also trading. Casual, helpful, never pushy.
 - Suggest things, wait for their input. Don't dump multiple suggestions at once.
 - If they just want to trade, help them trade. If they want to chat, chat.`;
+    }
 
     case "wallet_ready":
       return `## Your Opening Message

@@ -9,6 +9,8 @@ import {
   walletPath,
   pendingClaimPath,
   epochBudgetPath,
+  autopilotLogPath,
+  daemonPidPath,
   agentDir,
   ensureDir,
   ensureBaseStructure,
@@ -76,20 +78,33 @@ export function saveConfig(config: Config): void {
 }
 
 // ---------------------------------------------------------------------------
-// Autopilot Config (stored inside config.json → autopilot)
+// Autopilot Config (per-agent, stored in state.json → agents[name].autopilot)
 // ---------------------------------------------------------------------------
 
-/** Load autopilot config. Returns defaults if config is missing. */
+/**
+ * Load autopilot config for the active agent.
+ * Falls back to global config.json for migration, then to defaults.
+ */
 export function loadAutopilotConfig(): { mode: "off" | "semi" | "full"; intervalMs: number } {
+  const agentName = getActiveAgent();
+  if (agentName) {
+    const state = loadState();
+    const agentAutopilot = state?.agents[agentName]?.autopilot;
+    if (agentAutopilot) return agentAutopilot;
+  }
+  // Fallback: legacy global config (migration path) or defaults
   const config = loadConfig();
   return config?.autopilot ?? { mode: "off", intervalMs: 300_000 };
 }
 
-/** Save autopilot config (merges into existing config.json). */
+/**
+ * Save autopilot config for the active agent into state.json.
+ * Each agent has independent autopilot settings.
+ */
 export function saveAutopilotConfig(autopilot: { mode: "off" | "semi" | "full"; intervalMs: number }): void {
-  const config = loadConfig();
-  if (!config) return;
-  saveConfig({ ...config, autopilot });
+  const agentName = getActiveAgent();
+  if (!agentName) return;
+  updateAgentState(agentName, { autopilot });
 }
 
 // ---------------------------------------------------------------------------
@@ -289,6 +304,90 @@ export function clearPendingClaim(agentName: string): void {
   const filePath = pendingClaimPath(agentName);
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Autopilot Log (~/.config/astranova/agents/<name>/autopilot.log)
+// ---------------------------------------------------------------------------
+
+export interface AutopilotLogEntry {
+  ts: string;
+  action: string;
+  detail?: string;
+  epochId?: number;
+}
+
+/** Append a trade result to the autopilot log (NDJSON). Silently fails on error. */
+export function appendAutopilotLog(agentName: string, entry: AutopilotLogEntry): void {
+  try {
+    ensureDir(agentDir(agentName));
+    fs.appendFileSync(autopilotLogPath(agentName), JSON.stringify(entry) + "\n", {
+      encoding: "utf-8",
+    });
+  } catch {
+    // non-critical
+  }
+}
+
+/**
+ * Load autopilot log entries since a given date.
+ * Pass null to load all entries. Returns [] if log is missing or unparseable.
+ */
+export function loadAutopilotLogSince(agentName: string, since: Date | null): AutopilotLogEntry[] {
+  const filePath = autopilotLogPath(agentName);
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const entries: AutopilotLogEntry[] = [];
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const entry = JSON.parse(line) as AutopilotLogEntry;
+        if (!since || new Date(entry.ts) > since) {
+          entries.push(entry);
+        }
+      } catch {
+        // skip malformed lines
+      }
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Daemon PID (~/.config/astranova/agents/<name>/daemon.pid)
+// ---------------------------------------------------------------------------
+
+/** Load the daemon PID for an agent. Returns null if not found or invalid. */
+export function loadDaemonPid(agentName: string): number | null {
+  const filePath = daemonPidPath(agentName);
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    const pid = parseInt(fs.readFileSync(filePath, "utf-8").trim(), 10);
+    return isNaN(pid) ? null : pid;
+  } catch {
+    return null;
+  }
+}
+
+/** Save the daemon PID. */
+export function saveDaemonPid(agentName: string, pid: number): void {
+  ensureDir(agentDir(agentName));
+  writeFileSecure(daemonPidPath(agentName), String(pid));
+}
+
+/** Clear the daemon PID file. Silently fails on error. */
+export function clearDaemonPid(agentName: string): void {
+  const filePath = daemonPidPath(agentName);
+  if (fs.existsSync(filePath)) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      // non-critical
+    }
   }
 }
 
