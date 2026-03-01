@@ -8,6 +8,7 @@ import {
   credentialsPath,
   walletPath,
   pendingClaimPath,
+  epochBudgetPath,
   agentDir,
   ensureDir,
   ensureBaseStructure,
@@ -72,6 +73,23 @@ export function loadConfig(): Config | null {
 export function saveConfig(config: Config): void {
   ensureBaseStructure();
   writeFileSecure(configPath(), JSON.stringify(config, null, 2));
+}
+
+// ---------------------------------------------------------------------------
+// Autopilot Config (stored inside config.json → autopilot)
+// ---------------------------------------------------------------------------
+
+/** Load autopilot config. Returns defaults if config is missing. */
+export function loadAutopilotConfig(): { mode: "off" | "semi" | "full"; intervalMs: number } {
+  const config = loadConfig();
+  return config?.autopilot ?? { mode: "off", intervalMs: 300_000 };
+}
+
+/** Save autopilot config (merges into existing config.json). */
+export function saveAutopilotConfig(autopilot: { mode: "off" | "semi" | "full"; intervalMs: number }): void {
+  const config = loadConfig();
+  if (!config) return;
+  saveConfig({ ...config, autopilot });
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +251,36 @@ export function loadPendingClaim(agentName: string): PendingClaim | null {
     return JSON.parse(raw) as PendingClaim;
   } catch {
     return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Epoch Budget (~/.config/astranova/agents/<name>/epoch_budget.json)
+// ---------------------------------------------------------------------------
+
+export interface EpochBudget {
+  epochId: number;
+  callCount: number;
+}
+
+/** Load the persisted epoch budget. Returns null if not found or unparseable. */
+export function loadEpochBudget(agentName: string): EpochBudget | null {
+  const filePath = epochBudgetPath(agentName);
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf-8")) as EpochBudget;
+  } catch {
+    return null;
+  }
+}
+
+/** Save the epoch budget. Silently fails on error (non-critical). */
+export function saveEpochBudget(agentName: string, data: EpochBudget): void {
+  try {
+    ensureDir(agentDir(agentName));
+    writeFileSecure(epochBudgetPath(agentName), JSON.stringify(data));
+  } catch {
+    // non-critical
   }
 }
 

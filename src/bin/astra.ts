@@ -14,6 +14,7 @@ import {
   updateAgentState,
   isRestartRequested,
   clearRestartFlag,
+  loadAutopilotConfig,
 } from "../config/store.js";
 import { ensureBaseStructure } from "../config/paths.js";
 import { runOnboarding } from "../onboarding/index.js";
@@ -192,7 +193,10 @@ async function main(): Promise<void> {
     }
   }
 
-  // Step 8: Launch Ink TUI
+  // Step 8: Load autopilot config
+  const initialAutopilotConfig = loadAutopilotConfig();
+
+  // Step 9: Launch Ink TUI
   const { waitUntilExit } = render(
     React.createElement(App, {
       agentName,
@@ -207,6 +211,7 @@ async function main(): Promise<void> {
       memoryContent,
       initialCoreMessages,
       initialChatMessages,
+      initialAutopilotConfig,
       debug,
     }),
   );

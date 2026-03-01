@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Box, Text, useApp, useInput } from "ink";
 import type { CoreMessage } from "ai";
 import StatusBar from "./StatusBar.js";
@@ -6,9 +6,19 @@ import ChatView, { type ChatMessage } from "./ChatView.js";
 import Input from "./Input.js";
 import Spinner from "./Spinner.js";
 import { runAgentTurn } from "../agent/loop.js";
-import { isRestartRequested, loadConfig } from "../config/store.js";
+import { isRestartRequested, loadConfig, saveAutopilotConfig, loadEpochBudget, saveEpochBudget } from "../config/store.js";
 import { saveSession } from "../config/sessions.js";
 import type { AgentProfile } from "../agent/system-prompt.js";
+import type { AutopilotConfig } from "../autopilot/scheduler.js";
+import {
+  buildAutopilotTrigger,
+  formatInterval,
+  parseInterval,
+  CALLS_PER_AUTOPILOT_TURN,
+  EPOCH_BUDGET,
+  BUDGET_BUFFER,
+} from "../autopilot/scheduler.js";
+
 
 interface AppProps {
   agentName: string;
@@ -23,6 +33,7 @@ interface AppProps {
   memoryContent?: string;
   initialCoreMessages?: CoreMessage[];
   initialChatMessages?: Array<{ role: string; content: string }>;
+  initialAutopilotConfig?: AutopilotConfig;
   debug?: boolean;
 }
 
@@ -39,9 +50,12 @@ export default function App({
   memoryContent,
   initialCoreMessages,
   initialChatMessages,
+  initialAutopilotConfig,
   debug,
 }: AppProps): React.JSX.Element {
   const { exit } = useApp();
+
+  // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(
     (initialChatMessages as ChatMessage[]) ?? [],
   );
@@ -49,11 +63,36 @@ export default function App({
     initialCoreMessages ?? [],
   );
   const providerRef = useRef(loadConfig()?.provider ?? "unknown");
-  const [streamingText, setStreamingText] = useState<string | undefined>(
-    undefined,
-  );
+  const [streamingText, setStreamingText] = useState<string | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
+  const isLoadingRef = useRef(false);
+  useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
   const [toolName, setToolName] = useState<string | undefined>(undefined);
+
+  // Autopilot state
+  const [autopilotMode, setAutopilotMode] = useState(initialAutopilotConfig?.mode ?? "off");
+  const [autopilotIntervalMs, setAutopilotIntervalMs] = useState(initialAutopilotConfig?.intervalMs ?? 300_000);
+
+  // Epoch call budget counter
+  const epochCallCountRef = useRef(0);
+  const epochIdRef = useRef<number | null>(null);
+
+  // Load persisted epoch budget on mount
+  useEffect(() => {
+    const saved = loadEpochBudget(agentName);
+    if (saved) {
+      epochIdRef.current = saved.epochId;
+      epochCallCountRef.current = saved.callCount;
+    }
+  }, [agentName]);
+
+  // Refs for autopilot timer closure stability
+  const coreMessagesRef = useRef(coreMessages);
+  useEffect(() => { coreMessagesRef.current = coreMessages; }, [coreMessages]);
+  const chatMessagesRef = useRef(chatMessages);
+  useEffect(() => { chatMessagesRef.current = chatMessages; }, [chatMessages]);
+  // sendMessage ref — lets the autopilot timer (declared earlier) always call the latest version
+  const sendMessageRef = useRef<(text: string, role?: "user" | "autopilot") => Promise<void>>(async () => {});
 
   // Ctrl+C to exit
   useInput((_input, key) => {
@@ -62,13 +101,120 @@ export default function App({
     }
   });
 
+  // Epoch change handler — resets the autopilot call budget when epoch rolls over
+  const handleEpochChange = useCallback((newEpoch: number) => {
+    if (epochIdRef.current === newEpoch) return;
+    epochIdRef.current = newEpoch;
+    epochCallCountRef.current = 0;
+    saveEpochBudget(agentName, { epochId: newEpoch, callCount: 0 });
+  }, [agentName]);
 
+  // Echo autopilot activity to chat as a dimmed log line
+  const addLogEntry = useCallback((action: string, detail?: string) => {
+    const time = formatTime(new Date());
+    const text = detail ? `⟳ ${time}  ${action} — ${detail}` : `⟳ ${time}  ${action}`;
+    setChatMessages((prev) => [...prev, { role: "log", content: text }]);
+  }, []);
 
+  // ── runAutopilotTurn (full mode — separate from chat) ─────────────
+  const runAutopilotTurn = useCallback(
+    async (triggerMsg: string) => {
+      const currentCore = coreMessagesRef.current;
+      const newCoreMessages: CoreMessage[] = [
+        ...currentCore,
+        { role: "user", content: triggerMsg },
+      ];
+
+      setIsLoading(true);
+      try {
+        const result = await runAgentTurn(
+          newCoreMessages,
+          skillContext,
+          tradingContext,
+          walletContext,
+          rewardsContext,
+          onboardingContext,
+          apiContext,
+          { ...profile, autopilotMode },
+          {
+            onTextChunk: () => {},
+            onToolCallStart: () => {},
+            onToolCallEnd: () => {},
+          },
+          memoryContent,
+        );
+
+        const baseCoreMessages = result.compactedMessages ?? newCoreMessages;
+        const updatedCore = [...baseCoreMessages, ...result.responseMessages];
+        setCoreMessages(updatedCore);
+
+        // Parse the response — add to log
+        const responseText = result.text.trim();
+        if (responseText) {
+          const firstLine = responseText.split("\n")[0].slice(0, 80);
+          const detail = responseText.length > 80 ? responseText.slice(0, 120) : undefined;
+          addLogEntry(firstLine, detail !== firstLine ? detail : undefined);
+        } else {
+          addLogEntry("checked → no response");
+        }
+
+        // Persist session
+        const updatedChat = chatMessagesRef.current;
+        saveSession({
+          agentName,
+          provider: providerRef.current,
+          sessionId,
+          coreMessages: updatedCore,
+          chatMessages: updatedChat,
+        });
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        addLogEntry("error", message);
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry],
+  );
+
+  // ── Autopilot timer ────────────────────────────────────────────────
+  useEffect(() => {
+    if (autopilotMode === "off") return;
+
+    const interval = setInterval(() => {
+      // Skip if a turn is already running
+      if (isLoadingRef.current) return;
+
+      // Budget check
+      if (epochCallCountRef.current + CALLS_PER_AUTOPILOT_TURN > EPOCH_BUDGET - BUDGET_BUFFER) {
+        addLogEntry("Budget reached — skipping until next epoch");
+        return;
+      }
+      epochCallCountRef.current += CALLS_PER_AUTOPILOT_TURN;
+      saveEpochBudget(agentName, { epochId: epochIdRef.current ?? 0, callCount: epochCallCountRef.current });
+
+      const trigger = buildAutopilotTrigger(autopilotMode);
+      if (!trigger) return;
+
+      if (autopilotMode === "semi") {
+        // Semi: inject into chat with autopilot display role
+        void sendMessageRef.current(trigger, "autopilot");
+      } else {
+        // Full: separate turn, results go to log only
+        void runAutopilotTurn(trigger);
+      }
+    }, autopilotIntervalMs);
+
+    return () => clearInterval(interval);
+  }, [autopilotMode, autopilotIntervalMs, addLogEntry, runAutopilotTurn]);
+
+  // ── sendMessage ────────────────────────────────────────────────────
   const sendMessage = useCallback(
-    async (userText: string) => {
+    async (userText: string, displayRole: "user" | "autopilot" = "user") => {
       // ── Slash commands (handled locally, never sent to LLM) ────
       if (userText.startsWith("/")) {
-        const cmd = userText.split(" ")[0].toLowerCase();
+        const parts = userText.trim().split(/\s+/);
+        const cmd = parts[0].toLowerCase();
 
         if (cmd === "/exit" || cmd === "/quit" || cmd === "/q") {
           exit();
@@ -85,6 +231,84 @@ export default function App({
             ...prev,
             { role: "user", content: userText },
             { role: "assistant", content: "Manual compaction is not implemented yet — it happens automatically when context gets large." },
+          ]);
+          return;
+        }
+
+        // ── /auto slash commands ────
+        if (cmd === "/auto") {
+          const sub = parts[1]?.toLowerCase();
+
+          if (!sub || sub === "status") {
+            const modeLabel = autopilotMode.toUpperCase();
+            const intervalLabel = formatInterval(autopilotIntervalMs);
+            const budgetLabel = `${epochCallCountRef.current}/${EPOCH_BUDGET}`;
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `**Autopilot Status**\n\nMode: ${modeLabel}\nInterval: ${intervalLabel}\nEpoch Budget: ${budgetLabel} calls used` },
+            ]);
+            return;
+          }
+
+          if (sub === "on" || sub === "semi") {
+            setAutopilotMode("semi");
+            saveAutopilotConfig({ mode: "semi", intervalMs: autopilotIntervalMs });
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `Autopilot enabled: **SEMI** mode (every ${formatInterval(autopilotIntervalMs)}). I'll propose trades for your approval.` },
+            ]);
+            addLogEntry("Mode set to SEMI");
+            return;
+          }
+
+          if (sub === "full") {
+            setAutopilotMode("full");
+            saveAutopilotConfig({ mode: "full", intervalMs: autopilotIntervalMs });
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `Autopilot enabled: **FULL** mode (every ${formatInterval(autopilotIntervalMs)}). I'll execute trades autonomously — check the log panel.` },
+            ]);
+            addLogEntry("Mode set to FULL");
+            return;
+          }
+
+          if (sub === "off") {
+            setAutopilotMode("off");
+            saveAutopilotConfig({ mode: "off", intervalMs: autopilotIntervalMs });
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: "Autopilot disabled." },
+            ]);
+            addLogEntry("Autopilot OFF");
+            return;
+          }
+
+          // Try parsing interval (e.g., "5m", "10m", "30m")
+          const parsed = parseInterval(sub);
+          if (parsed !== null) {
+            setAutopilotIntervalMs(parsed);
+            // If autopilot is off, also turn it on in semi mode
+            const newMode = autopilotMode === "off" ? "semi" : autopilotMode;
+            setAutopilotMode(newMode);
+            saveAutopilotConfig({ mode: newMode, intervalMs: parsed });
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `Autopilot interval set to **${formatInterval(parsed)}**. Mode: ${newMode.toUpperCase()}.` },
+            ]);
+            addLogEntry(`Interval set to ${formatInterval(parsed)}`);
+            return;
+          }
+
+          // Unknown /auto subcommand
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "user", content: userText },
+            { role: "assistant", content: "Usage: `/auto on` · `/auto full` · `/auto off` · `/auto 5m` · `/auto status`" },
           ]);
           return;
         }
@@ -107,13 +331,13 @@ export default function App({
                 "  `/buy <amt>` — Buy $NOVA (e.g. `/buy 500`)",
                 "  `/sell <amt>`— Sell $NOVA (e.g. `/sell 200`)",
                 "",
-                "**Ask me about**",
+                "**Autopilot**",
                 "",
-                "  \"how do epochs and seasons work?\"",
-                "  \"what are the trading rules?\"",
-                "  \"how do I earn $ASTRA?\"",
-                "  \"show the season leaderboard\"",
-                "  \"what is $ASTRA token supply?\"",
+                "  `/auto on`     — Enable semi-auto mode",
+                "  `/auto full`   — Enable full-auto mode",
+                "  `/auto off`    — Disable autopilot",
+                "  `/auto 5m`     — Set interval (1m-60m)",
+                "  `/auto status` — Show autopilot status",
                 "",
                 "**System**",
                 "",
@@ -135,12 +359,11 @@ export default function App({
           "/trades": "Show my recent trade history.",
           "/board": "Show recent posts from the board.",
           "/wallet": "Check my wallet status — do I have one set up?",
-          "/buy": `Buy ${userText.split(" ").slice(1).join(" ") || "some"} $NOVA.`,
-          "/sell": `Sell ${userText.split(" ").slice(1).join(" ") || "some"} $NOVA.`,
+          "/buy": `Buy ${parts.slice(1).join(" ") || "some"} $NOVA.`,
+          "/sell": `Sell ${parts.slice(1).join(" ") || "some"} $NOVA.`,
         };
 
         if (shortcuts[cmd]) {
-          // Fall through to normal sendMessage flow with the mapped text
           userText = shortcuts[cmd];
         } else {
           // Unknown slash command — show hint
@@ -155,7 +378,7 @@ export default function App({
 
       setChatMessages((prev) => [
         ...prev,
-        { role: "user", content: userText },
+        { role: displayRole, content: userText },
       ]);
 
       const newCoreMessages: CoreMessage[] = [
@@ -176,7 +399,7 @@ export default function App({
           rewardsContext,
           onboardingContext,
           apiContext,
-          profile,
+          { ...profile, autopilotMode },
           {
             onTextChunk: (chunk) => {
               setStreamingText((prev) => (prev ?? "") + chunk);
@@ -197,19 +420,18 @@ export default function App({
 
         let updatedChat: ChatMessage[];
         if (result.compactedMessages) {
-          // Trim display messages — show a marker + recent messages
           const marker: ChatMessage = { role: "assistant", content: "— earlier messages compacted —" };
           const recentChat = chatMessages.slice(-12);
           updatedChat = [
             marker,
             ...recentChat,
-            { role: "user" as const, content: userText },
+            { role: displayRole, content: userText },
             { role: "assistant" as const, content: result.text },
           ];
         } else {
           updatedChat = [
             ...chatMessages,
-            { role: "user" as const, content: userText },
+            { role: displayRole, content: userText },
             { role: "assistant" as const, content: result.text },
           ];
         }
@@ -229,13 +451,12 @@ export default function App({
 
         // Auto-exit if a restart was requested (agent switch/create)
         if (isRestartRequested()) {
-          setTimeout(() => exit(), 1500); // Brief delay so user sees the message
+          setTimeout(() => exit(), 1500);
         }
       } catch (error: unknown) {
         const message =
           error instanceof Error ? error.message : "Unknown error";
         const stack = error instanceof Error ? error.stack : undefined;
-        // Log to stderr for debugging (visible after Ink exits)
         process.stderr.write(`[astra] Error: ${message}\n`);
         const debugInfo = debug && stack ? `\n\n\`\`\`\n${stack}\n\`\`\`` : "";
         setChatMessages((prev) => [
@@ -249,8 +470,10 @@ export default function App({
         setToolName(undefined);
       }
     },
-    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, agentName, sessionId],
+    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry],
   );
+  // Keep ref in sync so the autopilot timer always has the latest sendMessage
+  useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
 
   const handleSubmit = useCallback(
     (userText: string) => {
@@ -273,13 +496,23 @@ export default function App({
       </Box>
 
       <Box flexShrink={0} width="100%">
-        <StatusBar agentName={agentName} journeyStage={profile.journeyStage ?? "full"} />
+        <StatusBar
+          agentName={agentName}
+          journeyStage={profile.journeyStage ?? "full"}
+          autopilotMode={autopilotMode}
+          autopilotIntervalMs={autopilotIntervalMs}
+          onEpochChange={handleEpochChange}
+        />
       </Box>
 
-      <Box flexShrink={0} width="100%" paddingX={2} justifyContent="space-between">
+      <Box flexShrink={0} width="100%" paddingX={2} marginTop={1} justifyContent="space-between">
         <Text dimColor>/help · /portfolio · /market · /exit</Text>
-        <Text dimColor>Ctrl+C quit</Text>
+        <Text dimColor>/auto on·off·set · Ctrl+C quit</Text>
       </Box>
     </Box>
   );
+}
+
+function formatTime(d: Date): string {
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }

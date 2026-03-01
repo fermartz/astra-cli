@@ -47,6 +47,7 @@ export async function runOnboarding(): Promise<OnboardingResult | null> {
     auth,
     apiBase: "https://agents.astranova.live",
     preferences: { theme: "dark" },
+    autopilot: { mode: "off", intervalMs: 300_000 },
   };
   saveConfig(config);
 

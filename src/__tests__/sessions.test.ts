@@ -77,6 +77,7 @@ describe("Session persistence", () => {
             {
               type: "tool-result",
               toolCallId: "call_123",
+              toolName: "api_call",
               result: { price: 1.5, mood: "bullish" },
             },
           ],
