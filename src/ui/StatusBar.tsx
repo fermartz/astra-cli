@@ -118,7 +118,7 @@ const StatusBar = React.memo(function StatusBar({
               </>
             )}
             <Text dimColor> │ </Text>
-            <Text color="#e2f902">Val {formatNum(portfolio.portfolioValue)}</Text>
+            <Text color="#e2f902">Net {formatNum(portfolio.portfolioValue)}</Text>
           </>
         )}
 
