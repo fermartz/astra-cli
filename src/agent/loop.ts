@@ -1,4 +1,4 @@
-import { streamText, generateText, type CoreMessage } from "ai";
+import { streamText, generateText, type CoreMessage, type TextPart, type ToolCallPart, type ToolResultPart } from "ai";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ZodType } from "zod";
 import { getModel, isCodexOAuth, isOpenAIResponses, getCodexAccessToken, getOpenAIApiKey } from "./provider.js";
@@ -257,13 +257,13 @@ async function runResponsesApiTurn(
     steps++;
 
     // Build assistant message with text + tool calls for this step
-    const assistantContent: Array<{ type: string; [key: string]: unknown }> = [];
+    const assistantContent: Array<TextPart | ToolCallPart> = [];
     if (result.text) {
       assistantContent.push({ type: "text", text: result.text });
     }
 
     // Collect tool results for this step
-    const toolResultParts: Array<{ type: string; [key: string]: unknown }> = [];
+    const toolResultParts: Array<ToolResultPart> = [];
 
     // Execute each tool call
     for (const tc of result.toolCalls) {
@@ -285,6 +285,7 @@ async function runResponsesApiTurn(
         toolResultParts.push({
           type: "tool-result",
           toolCallId: tc.callId,
+          toolName: tc.name,
           result: errorResult,
         });
         codexInput.push({
@@ -325,6 +326,7 @@ async function runResponsesApiTurn(
         toolResultParts.push({
           type: "tool-result",
           toolCallId: tc.callId,
+          toolName: tc.name,
           result: toolResult,
         });
         codexInput.push({
@@ -358,6 +360,7 @@ async function runResponsesApiTurn(
         toolResultParts.push({
           type: "tool-result",
           toolCallId: tc.callId,
+          toolName: tc.name,
           result: errorResult,
         });
         codexInput.push({

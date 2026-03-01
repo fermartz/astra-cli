@@ -53,6 +53,7 @@ describe("Config Store", () => {
         auth: { type: "api-key", apiKey: "sk-test-123" },
         apiBase: "https://agents.astranova.live",
         preferences: { theme: "dark" },
+        autopilot: { mode: "off", intervalMs: 300_000 },
       };
       saveConfig(config);
       const loaded = loadConfig();

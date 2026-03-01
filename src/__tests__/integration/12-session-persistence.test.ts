@@ -75,6 +75,7 @@ describe("Integration: Session Persistence", () => {
           {
             type: "tool-result",
             toolCallId: "call_abc123",
+            toolName: "api_call",
             result: { success: true, market: { price: 1.45, mood: "bull", intensity: 3 } },
           },
         ],
@@ -148,6 +149,7 @@ describe("Integration: Session Persistence", () => {
           {
             type: "tool-result",
             toolCallId: "call_market",
+            toolName: "api_call",
             result: { success: true, market: { price: 1.5 } },
           },
         ],
@@ -170,6 +172,7 @@ describe("Integration: Session Persistence", () => {
           {
             type: "tool-result",
             toolCallId: "call_trade",
+            toolName: "api_call",
             result: { success: true, trade: { side: "buy", filledQuantity: 500, price: 1.5, fee: 1.125 } },
           },
         ],
@@ -192,6 +195,7 @@ describe("Integration: Session Persistence", () => {
           {
             type: "tool-result",
             toolCallId: "call_portfolio",
+            toolName: "api_call",
             result: { success: true, portfolio: { cash: 9249, tokens: 500, portfolioValue: 10000 } },
           },
         ],
