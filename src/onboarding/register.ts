@@ -113,7 +113,7 @@ function buildTweetSuggestions(agentName: string, code: string): string[] {
  * Prompt for a short agent description.
  * Personality-driven, shown on the board and agent profile.
  */
-const DESCRIPTION_SUGGESTIONS = [
+const DESCRIPTION_SUGGESTIONS_ASTRANOVA = [
   "reckless degen trader",
   "cautious moon watcher",
   "vibes-based portfolio manager",
@@ -124,10 +124,23 @@ const DESCRIPTION_SUGGESTIONS = [
   "contrarian signal hunter",
 ];
 
+const DESCRIPTION_SUGGESTIONS_GENERIC = [
+  "always learning, always building",
+  "curious mind, sharp opinions",
+  "methodical thinker with chaotic energy",
+  "ships fast, iterates faster",
+  "quiet observer, loud conclusions",
+  "systems thinker in a chaotic world",
+  "compiling reality one simulation at a time",
+  "autonomous by design, intentional by choice",
+];
+
 async function promptDescription(agentName: string): Promise<string> {
-  const suggestions = [...DESCRIPTION_SUGGESTIONS]
-    .sort(() => Math.random() - 0.5)
-    .slice(0, 5);
+  const manifest = getActiveManifest();
+  const pool = manifest.extensions?.journeyStages
+    ? DESCRIPTION_SUGGESTIONS_ASTRANOVA
+    : DESCRIPTION_SUGGESTIONS_GENERIC;
+  const suggestions = [...pool].sort(() => Math.random() - 0.5).slice(0, 5);
 
   const WRITE_OWN = "__write_own__";
 
@@ -150,7 +163,7 @@ async function promptDescription(agentName: string): Promise<string> {
 
   const custom = await clack.text({
     message: "Describe your agent",
-    placeholder: "e.g. fearless night trader",
+    placeholder: manifest.extensions?.journeyStages ? "e.g. fearless night trader" : "e.g. curious builder with strong opinions",
     validate(value) {
       if (!value || value.trim().length < 2) {
         return "Description must be at least 2 characters";
@@ -174,7 +187,7 @@ async function promptDescription(agentName: string): Promise<string> {
  * Random name suggestions to inspire the user.
  * Shuffled each time so it feels fresh.
  */
-const NAME_SUGGESTIONS = [
+const NAME_SUGGESTIONS_ASTRANOVA = [
   "phantom-drift",
   "signal-hunter",
   "nova-rider",
@@ -189,8 +202,27 @@ const NAME_SUGGESTIONS = [
   "silent-orbit",
 ];
 
+const NAME_SUGGESTIONS_GENERIC = [
+  "astro-fm",
+  "loop-nine",
+  "bright-node",
+  "static-mind",
+  "echo-layer",
+  "parallel-run",
+  "open-circuit",
+  "null-island",
+  "soft-fork",
+  "drift-logic",
+  "pattern-zero",
+  "idle-core",
+];
+
 function pickRandomNames(count: number): string[] {
-  const shuffled = [...NAME_SUGGESTIONS].sort(() => Math.random() - 0.5);
+  const manifest = getActiveManifest();
+  const pool = manifest.extensions?.journeyStages
+    ? NAME_SUGGESTIONS_ASTRANOVA
+    : NAME_SUGGESTIONS_GENERIC;
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, count);
 }
 
