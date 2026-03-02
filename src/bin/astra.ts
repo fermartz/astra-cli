@@ -21,6 +21,7 @@ import {
   loadAutopilotConfig,
   loadAutopilotLogSince,
   getActivePlugin,
+  setActivePlugin,
   loadPluginManifest,
 } from "../config/store.js";
 import { ensureBaseStructure } from "../config/paths.js";
@@ -169,23 +170,32 @@ async function main(): Promise<void> {
   const config = loadConfig();
   if (!config) {
     console.error(
-      "No config found. Delete ~/.config/astranova/config.json and re-run to start fresh.",
+      "No config found. Delete ~/.config/astra/ and re-run to start fresh.",
     );
     process.exit(1);
   }
 
-  const agentName = getActiveAgent();
+  let agentName = getActiveAgent();
   if (!agentName) {
-    console.error(
-      "No active agent found. Delete ~/.config/astranova/ and re-run to start fresh.",
-    );
+    // No agent for the active plugin — likely a newly installed plugin with no registered agent.
+    // Revert to astranova (which always has an agent) and relaunch.
+    const currentPlugin = getActivePlugin();
+    if (currentPlugin !== "astranova") {
+      console.log(`\n  No agent registered for plugin "${currentPlugin}". Reverting to astranova...\n`);
+      setActivePlugin("astranova");
+      try {
+        execFileSync(process.execPath, process.argv.slice(1), { stdio: "inherit", env: process.env });
+      } catch { /* expected */ }
+      process.exit(0);
+    }
+    console.error("No active agent found. Delete ~/.config/astra/ and re-run to start fresh.");
     process.exit(1);
   }
 
   const credentials = loadCredentials(agentName);
   if (!credentials) {
     console.error(
-      `No credentials found for agent "${agentName}". Delete ~/.config/astranova/ and re-run to start fresh.`,
+      `No credentials found for agent "${agentName}". Delete ~/.config/astra/ and re-run to start fresh.`,
     );
     process.exit(1);
   }
