@@ -1,17 +1,18 @@
 import { getCached, invalidateCache } from "./cache.js";
+import { getActiveManifest } from "../domain/plugin.js";
 
-const API_BASE = "https://agents.astranova.live";
 const TTL_24H = 24 * 60 * 60 * 1000;
 
 type RemoteContext = "skill.md" | "ONBOARDING.md" | "WALLET.md" | "TRADING.md" | "REWARDS.md" | "GUIDE.md" | "API.md";
 
 /**
- * Fetch a remote context file from agents.astranova.live.
+ * Fetch a remote context file from the active plugin's API base.
  * Cached locally with 24h TTL. Falls back to stale cache on network error.
  * Returns null if unavailable (never crashes).
  */
 export async function fetchRemoteContext(name: RemoteContext): Promise<string | null> {
-  return getCached(name, `${API_BASE}/${name}`, TTL_24H);
+  const { apiBase } = getActiveManifest();
+  return getCached(name, `${apiBase}/${name}`, TTL_24H);
 }
 
 /** Fetch the main skill.md context (injected into LLM system prompt). */

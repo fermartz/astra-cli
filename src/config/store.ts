@@ -392,6 +392,28 @@ export function clearDaemonPid(agentName: string): void {
 }
 
 // ---------------------------------------------------------------------------
+// Active Plugin
+// ---------------------------------------------------------------------------
+
+/**
+ * Get the name of the currently active plugin.
+ * Phase 1: always "astranova" (single plugin).
+ * Phase 2: will read from state.json after `astra add` support is added.
+ */
+export function getActivePlugin(): string {
+  return "astranova";
+}
+
+/**
+ * Set the active plugin by name.
+ * Phase 1: no-op (single plugin, no switching yet).
+ * Phase 2: will persist to state.json.
+ */
+export function setActivePlugin(_name: string): void {
+  // Phase 2: saveState({ ...loadState()!, activePlugin: _name });
+}
+
+// ---------------------------------------------------------------------------
 // Agent Discovery
 // ---------------------------------------------------------------------------
 

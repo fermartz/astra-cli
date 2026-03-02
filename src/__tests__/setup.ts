@@ -8,6 +8,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { beforeEach, afterEach } from "vitest";
+import { setActiveManifest } from "../domain/plugin.js";
+import { ASTRANOVA_MANIFEST } from "../domain/astranova/manifest.js";
 
 let testDir: string;
 
@@ -94,6 +96,8 @@ beforeEach(() => {
   fs.mkdirSync(path.join(testDir, "agents"), { recursive: true });
   fs.mkdirSync(path.join(testDir, ".cache"), { recursive: true });
   process.env.ASTRA_TEST_DIR = testDir;
+  // Set the active plugin manifest so tools and remote context can resolve the apiBase/allowedPaths.
+  setActiveManifest(ASTRANOVA_MANIFEST);
 });
 
 afterEach(() => {

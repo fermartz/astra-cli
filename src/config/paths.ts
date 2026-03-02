@@ -108,6 +108,11 @@ export function cachePath(fileName: string): string {
   return path.join(_root(), ".cache", fileName);
 }
 
+/** Path to a plugin's local data directory. */
+export function pluginDir(pluginName: string): string {
+  return path.join(_root(), "plugins", pluginName);
+}
+
 /**
  * Ensure a directory exists. Creates it recursively if needed.
  * Applies chmod 700 to the astranova root dir (owner-only access).

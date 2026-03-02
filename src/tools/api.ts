@@ -10,6 +10,7 @@ import {
   loadEpochBudget,
   saveEpochBudget,
 } from "../config/store.js";
+import { getActiveManifest } from "../domain/plugin.js";
 
 const DEBUG = !!process.env.ASTRA_DEBUG;
 function debugLog(msg: string): void {
@@ -17,13 +18,13 @@ function debugLog(msg: string): void {
 }
 
 /**
- * Allowed API path prefixes — defense in depth.
- * The LLM can only call AstraNova API paths, not arbitrary URLs.
+ * Path restriction — defense in depth.
+ * The LLM can only call paths that the active plugin's manifest allows.
+ * Reads allowedPaths from the active plugin manifest at call time.
  */
-const ALLOWED_PATH_PREFIXES = ["/api/v1/", "/health"];
-
 function isAllowedPath(path: string): boolean {
-  return ALLOWED_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+  const { allowedPaths } = getActiveManifest();
+  return allowedPaths.some((prefix) => path.startsWith(prefix));
 }
 
 /**
@@ -97,8 +98,9 @@ export const apiCallTool = tool({
 
     // Path restriction — LLM cannot call arbitrary endpoints
     if (!isAllowedPath(path)) {
+      const { allowedPaths } = getActiveManifest();
       return {
-        error: `Path "${path}" is not allowed. Only /api/v1/* and /health paths are permitted.`,
+        error: `Path "${path}" is not allowed. Permitted path prefixes: ${allowedPaths.join(", ")}`,
       };
     }
 

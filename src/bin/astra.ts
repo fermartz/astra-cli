@@ -2,6 +2,8 @@ import process from "node:process";
 import React from "react";
 import { render } from "ink";
 import { execFileSync } from "node:child_process";
+import { setActiveManifest } from "../domain/plugin.js";
+import { ASTRANOVA_MANIFEST } from "../domain/astranova/manifest.js";
 import {
   isConfigured,
   loadConfig,
@@ -63,6 +65,10 @@ function detectJourneyStage(params: {
 
 
 async function main(): Promise<void> {
+  // Set the active plugin manifest before any tool or remote context call.
+  // Phase 2: load from state.json to support plugin switching.
+  setActiveManifest(ASTRANOVA_MANIFEST);
+
   ensureBaseStructure();
 
   // Parse CLI args
