@@ -79,6 +79,12 @@ async function main(): Promise<void> {
   const debug = args.includes("--debug") || args.includes("-d");
   const isDaemonMode = args.includes("--daemon");
 
+  // --plugins-picker: run the clack plugin picker in a fresh process (clean terminal state)
+  if (args.includes("--plugins-picker")) {
+    await runPluginsPicker();
+    process.exit(0);
+  }
+
   // --add <url>: install a plugin and exit (no TUI needed)
   const addIdx = args.indexOf("--add");
   if (addIdx !== -1) {
@@ -303,10 +309,18 @@ async function main(): Promise<void> {
 
   await waitUntilExit();
 
-  // Check if the plugins picker was requested (by /plugins TUI command)
+  // Check if the plugins picker was requested (by /plugins TUI command).
+  // Relaunch as a fresh process so the terminal is fully restored before clack runs.
   if (isPluginsPickerRequested()) {
     clearPluginsPickerFlag();
-    await runPluginsPicker();
+    try {
+      execFileSync(process.execPath, [...process.argv.slice(1), "--plugins-picker"], {
+        stdio: "inherit",
+        env: process.env,
+      });
+    } catch {
+      // execFileSync throws when the child exits — that's expected
+    }
     process.exit(0);
   }
 
