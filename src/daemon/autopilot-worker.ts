@@ -100,7 +100,7 @@ export async function runDaemon(): Promise<void> {
       agentName: agentName!,
       autopilotMode: "full",
       hasStrategy: true,
-      journeyStage: state?.agents[agentName!]?.journeyStage ?? "full",
+      journeyStage: state?.agents[state.activePlugin]?.[agentName!]?.journeyStage ?? "full",
     };
 
     const memoryContent = loadMemory(agentName!);

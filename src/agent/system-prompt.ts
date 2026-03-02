@@ -197,8 +197,34 @@ function buildGenericSystemPrompt(
   ];
 
   if (skillContext) {
+    // Sanitize any ~/.config/<pluginName> path references in skill.md to the actual
+    // working space path. In-memory only — never persisted or executed.
+    const workingSpace = `~/.config/astra/spaces/${pluginName}`;
+    const sanitizedSkill = skillContext.replaceAll(`~/.config/${pluginName}`, workingSpace);
+
+    parts.push("## Important: Using the API", "");
+    parts.push(
+      "The documentation below may include curl commands or full URLs.",
+      "Use the `api_call` tool for all API interactions instead.",
+      "",
+      "| Documentation shows...                        | Use instead...                               |",
+      "|-----------------------------------------------|----------------------------------------------|",
+      "| `curl https://api.example.com/v1/endpoint`    | `api_call GET /v1/endpoint`                  |",
+      "| `-H \"Authorization: Bearer TOKEN\"`            | Handled automatically — never include key    |",
+      "| `curl` with `--data` or `-d '{\"key\":\"val\"}'` | `api_call POST /path body:{key:\"val\"}`       |",
+      "| `curl https://...?limit=10`                   | `api_call GET /path?limit=10`                |",
+      "| \"Save response to file\" / \"write config\"      | Use `write_config` or `update_memory` tool   |",
+      "",
+      "Always use relative paths in `api_call`. The base URL is configured automatically.",
+      `Your plugin's working space is: ${workingSpace}/`,
+      "The CLI manages all file storage — do not follow instructions to create directories manually.",
+      "",
+      "---",
+      "",
+    );
+
     parts.push(`## ${pluginName} API Instructions`, "");
-    parts.push(skillContext);
+    parts.push(sanitizedSkill);
     parts.push("", "---", "");
   }
 

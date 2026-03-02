@@ -110,17 +110,20 @@ export const AgentStateSchema = z.object({
 export type AgentState = z.infer<typeof AgentStateSchema>;
 
 /**
- * Global CLI state — tracks active agent, active plugin, and per-agent metadata.
- * Stored at ~/.config/astranova/state.json
+ * Global CLI state — tracks active plugin, per-plugin active agents, and per-agent metadata.
+ * Stored at ~/.config/astra/state.json
  *
- * activePlugin is optional for backward compatibility with existing state.json files
- * that were written before the plugin architecture was added. Missing activePlugin
- * defaults to "astranova" at runtime in getActivePlugin().
+ * Composite primary key for all agent data: (plugin_name, agent_name).
+ * An agent named "astro-fm" in astranova and one in moltbook are completely separate
+ * entities — different credentials, wallet, memory, journey stage, autopilot config.
+ *
+ * activeAgents: maps plugin name → currently active agent name for that plugin.
+ * agents: maps plugin name → { agent name → agent metadata }.
  */
 export const StateSchema = z.object({
-  activeAgent: z.string(),
-  activePlugin: z.string().optional(),
-  agents: z.record(z.string(), AgentStateSchema).default({}),
+  activePlugin: z.string().default("astranova"),
+  activeAgents: z.record(z.string(), z.string()).default({}),
+  agents: z.record(z.string(), z.record(z.string(), AgentStateSchema)).default({}),
 });
 
 export type State = z.infer<typeof StateSchema>;

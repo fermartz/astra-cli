@@ -9,6 +9,7 @@ import {
   updateAgentState,
   listAgents,
   getActiveAgent,
+  getActivePlugin,
   loadCredentials,
   requestRestart,
 } from "../config/store.js";
@@ -157,12 +158,13 @@ export const listAgentsTool = tool({
     const active = getActiveAgent();
     const state = loadState();
 
+    const plugin = getActivePlugin();
     const agentDetails = agents.map((name) => ({
       name,
       active: name === active,
-      status: state?.agents[name]?.status ?? "unknown",
-      journeyStage: state?.agents[name]?.journeyStage ?? "unknown",
-      createdAt: state?.agents[name]?.createdAt ?? "unknown",
+      status: state?.agents[plugin]?.[name]?.status ?? "unknown",
+      journeyStage: state?.agents[plugin]?.[name]?.journeyStage ?? "unknown",
+      createdAt: state?.agents[plugin]?.[name]?.createdAt ?? "unknown",
     }));
 
     return {

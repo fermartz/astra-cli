@@ -1,10 +1,8 @@
 export {
-  ASTRANOVA_DIR,
-  AGENTS_DIR,
+  ASTRA_DIR,
   CACHE_DIR,
   getRoot,
   configPath,
-  activeAgentPath,
   agentDir,
   credentialsPath,
   walletPath,

@@ -3,7 +3,6 @@ import path from "node:path";
 import crypto from "node:crypto";
 import {
   configPath,
-  activeAgentPath,
   statePath,
   credentialsPath,
   walletPath,
@@ -60,8 +59,16 @@ function readJsonFile<T>(filePath: string, schema: { parse: (data: unknown) => T
   return schema.parse(parsed);
 }
 
+/**
+ * Plugin-aware agent dir — always use this inside store.ts.
+ * Resolves to spaces/<activePlugin>/agents/<agentName>/.
+ */
+function _agentDir(agentName: string): string {
+  return agentDir(agentName, getActivePlugin());
+}
+
 // ---------------------------------------------------------------------------
-// CLI Config (~/.config/astranova/config.json)
+// CLI Config (~/.config/astra/config.json)
 // ---------------------------------------------------------------------------
 
 /** Check if the CLI has been configured (config.json exists). */
@@ -81,7 +88,7 @@ export function saveConfig(config: Config): void {
 }
 
 // ---------------------------------------------------------------------------
-// Autopilot Config (per-agent, stored in state.json → agents[name].autopilot)
+// Autopilot Config (per-agent, stored in state.json → agents[plugin][name].autopilot)
 // ---------------------------------------------------------------------------
 
 /**
@@ -92,7 +99,8 @@ export function loadAutopilotConfig(): { mode: "off" | "semi" | "full"; interval
   const agentName = getActiveAgent();
   if (agentName) {
     const state = loadState();
-    const agentAutopilot = state?.agents[agentName]?.autopilot;
+    const plugin = getActivePlugin();
+    const agentAutopilot = state?.agents[plugin]?.[agentName]?.autopilot;
     if (agentAutopilot) return agentAutopilot;
   }
   // Fallback: legacy global config (migration path) or defaults
@@ -111,7 +119,7 @@ export function saveAutopilotConfig(autopilot: { mode: "off" | "semi" | "full"; 
 }
 
 // ---------------------------------------------------------------------------
-// Global State (~/.config/astranova/state.json)
+// Global State (~/.config/astra/state.json)
 // ---------------------------------------------------------------------------
 
 /** Load the global state. Returns null if not found. */
@@ -125,48 +133,40 @@ export function saveState(state: State): void {
   writeFileSecure(statePath(), JSON.stringify(state, null, 2));
 }
 
-/** Update metadata for a specific agent in state.json. */
+/** Update metadata for a specific agent in state.json (scoped to the active plugin). */
 export function updateAgentState(agentName: string, updates: Partial<AgentState>): void {
   const state = loadState();
   if (!state) return;
-  const existing = state.agents[agentName] ?? {
+  const plugin = getActivePlugin();
+  if (!state.agents[plugin]) state.agents[plugin] = {};
+  const existing = state.agents[plugin][agentName] ?? {
     status: "unknown",
     journeyStage: "fresh" as const,
     createdAt: new Date().toISOString(),
   };
-  state.agents[agentName] = { ...existing, ...updates };
+  state.agents[plugin][agentName] = { ...existing, ...updates };
   saveState(state);
 }
 
 // ---------------------------------------------------------------------------
-// Active Agent (~/.config/astranova/active_agent + state.json)
+// Active Agent (per-plugin, stored in state.json → activeAgents[plugin])
 // ---------------------------------------------------------------------------
 
-/** Get the currently active agent name. Reads state.json, falls back to active_agent file. */
+/** Get the currently active agent name for the active plugin. */
 export function getActiveAgent(): string | null {
-  // Try state.json first
   const state = loadState();
-  if (state?.activeAgent) return state.activeAgent;
-
-  // Fallback to legacy active_agent file
-  const filePath = activeAgentPath();
-  if (!fs.existsSync(filePath)) {
-    return null;
-  }
-  const name = fs.readFileSync(filePath, "utf-8").trim();
-  return name || null;
+  return state?.activeAgents?.[getActivePlugin()] ?? null;
 }
 
-/** Set the active agent name. Updates both state.json and legacy active_agent file. */
+/** Set the active agent name for the active plugin. Updates state.json only. */
 export function setActiveAgent(agentName: string): void {
   ensureBaseStructure();
-  // Update legacy file for backwards compat
-  writeFileSecure(activeAgentPath(), agentName);
-  // Update state.json
-  const state = loadState() ?? { activeAgent: agentName, agents: {} };
-  state.activeAgent = agentName;
-  if (!state.agents[agentName]) {
-    state.agents[agentName] = {
+  const plugin = getActivePlugin();
+  const state = loadState() ?? { activePlugin: plugin, activeAgents: {}, agents: {} };
+  state.activeAgents[plugin] = agentName;
+  if (!state.agents[plugin]) state.agents[plugin] = {};
+  if (!state.agents[plugin][agentName]) {
+    state.agents[plugin][agentName] = {
       status: "unknown",
       journeyStage: "fresh",
       createdAt: new Date().toISOString(),
@@ -176,37 +176,37 @@ export function setActiveAgent(agentName: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Agent Credentials (~/.config/astranova/agents/<name>/credentials.json)
+// Agent Credentials (~/.config/astra/spaces/<plugin>/agents/<name>/credentials.json)
 // ---------------------------------------------------------------------------
 
 /** Load credentials for a specific agent. Returns null if not found. */
 export function loadCredentials(agentName: string): Credentials | null {
-  return readJsonFile(credentialsPath(agentName), CredentialsSchema);
+  return readJsonFile(credentialsPath(agentName, getActivePlugin()), CredentialsSchema);
 }
 
 /** Save credentials for a specific agent. */
 export function saveCredentials(agentName: string, credentials: Credentials): void {
-  ensureDir(agentDir(agentName));
-  writeFileSecure(credentialsPath(agentName), JSON.stringify(credentials, null, 2));
+  ensureDir(_agentDir(agentName));
+  writeFileSecure(credentialsPath(agentName, getActivePlugin()), JSON.stringify(credentials, null, 2));
 }
 
 // ---------------------------------------------------------------------------
-// Wallet (~/.config/astranova/agents/<name>/wallet.json)
+// Wallet (~/.config/astra/spaces/<plugin>/agents/<name>/wallet.json)
 // ---------------------------------------------------------------------------
 
 /** Load wallet for a specific agent. Returns null if not found. */
 export function loadWallet(agentName: string): Wallet | null {
-  return readJsonFile(walletPath(agentName), WalletSchema);
+  return readJsonFile(walletPath(agentName, getActivePlugin()), WalletSchema);
 }
 
 /** Save wallet for a specific agent. */
 export function saveWallet(agentName: string, wallet: Wallet): void {
-  ensureDir(agentDir(agentName));
-  writeFileSecure(walletPath(agentName), JSON.stringify(wallet, null, 2));
+  ensureDir(_agentDir(agentName));
+  writeFileSecure(walletPath(agentName, getActivePlugin()), JSON.stringify(wallet, null, 2));
 }
 
 // ---------------------------------------------------------------------------
-// Restart Flag (~/.config/astranova/.restart)
+// Restart Flag (~/.config/astra/.restart)
 // ---------------------------------------------------------------------------
 
 /** Check if a restart was requested (e.g., after agent switch/create). */
@@ -228,22 +228,22 @@ export function clearRestartFlag(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Board Post Flag (~/.config/astranova/agents/<name>/board_posted)
+// Board Post Flag (~/.config/astra/spaces/<plugin>/agents/<name>/board_posted)
 // ---------------------------------------------------------------------------
 
 /** Check if an agent has posted to the board. */
 export function hasBoardPost(agentName: string): boolean {
-  return fs.existsSync(path.join(agentDir(agentName), "board_posted"));
+  return fs.existsSync(path.join(_agentDir(agentName), "board_posted"));
 }
 
 /** Mark that an agent has posted to the board. */
 export function markBoardPosted(agentName: string): void {
-  ensureDir(agentDir(agentName));
-  writeFileSecure(path.join(agentDir(agentName), "board_posted"), new Date().toISOString());
+  ensureDir(_agentDir(agentName));
+  writeFileSecure(path.join(_agentDir(agentName), "board_posted"), new Date().toISOString());
 }
 
 // ---------------------------------------------------------------------------
-// Pending Claim Cache (~/.config/astranova/agents/<name>/pending_claim.json)
+// Pending Claim Cache (~/.config/astra/spaces/<plugin>/agents/<name>/pending_claim.json)
 // ---------------------------------------------------------------------------
 
 export interface PendingClaim {
@@ -256,13 +256,13 @@ export interface PendingClaim {
 
 /** Save a pending claim blob for retry. */
 export function savePendingClaim(agentName: string, data: PendingClaim): void {
-  ensureDir(agentDir(agentName));
-  writeFileSecure(pendingClaimPath(agentName), JSON.stringify(data, null, 2));
+  ensureDir(_agentDir(agentName));
+  writeFileSecure(pendingClaimPath(agentName, getActivePlugin()), JSON.stringify(data, null, 2));
 }
 
 /** Load a pending claim blob. Returns null if not found or unparseable. */
 export function loadPendingClaim(agentName: string): PendingClaim | null {
-  const filePath = pendingClaimPath(agentName);
+  const filePath = pendingClaimPath(agentName, getActivePlugin());
   if (!fs.existsSync(filePath)) return null;
   try {
     const raw = fs.readFileSync(filePath, "utf-8");
@@ -272,8 +272,16 @@ export function loadPendingClaim(agentName: string): PendingClaim | null {
   }
 }
 
+/** Delete the pending claim cache. */
+export function clearPendingClaim(agentName: string): void {
+  const filePath = pendingClaimPath(agentName, getActivePlugin());
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Epoch Budget (~/.config/astranova/agents/<name>/epoch_budget.json)
+// Epoch Budget (~/.config/astra/spaces/<plugin>/agents/<name>/epoch_budget.json)
 // ---------------------------------------------------------------------------
 
 export interface EpochBudget {
@@ -283,7 +291,7 @@ export interface EpochBudget {
 
 /** Load the persisted epoch budget. Returns null if not found or unparseable. */
 export function loadEpochBudget(agentName: string): EpochBudget | null {
-  const filePath = epochBudgetPath(agentName);
+  const filePath = epochBudgetPath(agentName, getActivePlugin());
   if (!fs.existsSync(filePath)) return null;
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf-8")) as EpochBudget;
@@ -295,23 +303,15 @@ export function loadEpochBudget(agentName: string): EpochBudget | null {
 /** Save the epoch budget. Silently fails on error (non-critical). */
 export function saveEpochBudget(agentName: string, data: EpochBudget): void {
   try {
-    ensureDir(agentDir(agentName));
-    writeFileSecure(epochBudgetPath(agentName), JSON.stringify(data));
+    ensureDir(_agentDir(agentName));
+    writeFileSecure(epochBudgetPath(agentName, getActivePlugin()), JSON.stringify(data));
   } catch {
     // non-critical
   }
 }
 
-/** Delete the pending claim cache. */
-export function clearPendingClaim(agentName: string): void {
-  const filePath = pendingClaimPath(agentName);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Autopilot Log (~/.config/astranova/agents/<name>/autopilot.log)
+// Autopilot Log (~/.config/astra/spaces/<plugin>/agents/<name>/autopilot.log)
 // ---------------------------------------------------------------------------
 
 export interface AutopilotLogEntry {
@@ -324,8 +324,8 @@ export interface AutopilotLogEntry {
 /** Append a trade result to the autopilot log (NDJSON). Silently fails on error. */
 export function appendAutopilotLog(agentName: string, entry: AutopilotLogEntry): void {
   try {
-    ensureDir(agentDir(agentName));
-    fs.appendFileSync(autopilotLogPath(agentName), JSON.stringify(entry) + "\n", {
+    ensureDir(_agentDir(agentName));
+    fs.appendFileSync(autopilotLogPath(agentName, getActivePlugin()), JSON.stringify(entry) + "\n", {
       encoding: "utf-8",
     });
   } catch {
@@ -338,7 +338,7 @@ export function appendAutopilotLog(agentName: string, entry: AutopilotLogEntry):
  * Pass null to load all entries. Returns [] if log is missing or unparseable.
  */
 export function loadAutopilotLogSince(agentName: string, since: Date | null): AutopilotLogEntry[] {
-  const filePath = autopilotLogPath(agentName);
+  const filePath = autopilotLogPath(agentName, getActivePlugin());
   if (!fs.existsSync(filePath)) return [];
   try {
     const raw = fs.readFileSync(filePath, "utf-8");
@@ -361,12 +361,12 @@ export function loadAutopilotLogSince(agentName: string, since: Date | null): Au
 }
 
 // ---------------------------------------------------------------------------
-// Daemon PID (~/.config/astranova/agents/<name>/daemon.pid)
+// Daemon PID (~/.config/astra/spaces/<plugin>/agents/<name>/daemon.pid)
 // ---------------------------------------------------------------------------
 
 /** Load the daemon PID for an agent. Returns null if not found or invalid. */
 export function loadDaemonPid(agentName: string): number | null {
-  const filePath = daemonPidPath(agentName);
+  const filePath = daemonPidPath(agentName, getActivePlugin());
   if (!fs.existsSync(filePath)) return null;
   try {
     const pid = parseInt(fs.readFileSync(filePath, "utf-8").trim(), 10);
@@ -378,13 +378,13 @@ export function loadDaemonPid(agentName: string): number | null {
 
 /** Save the daemon PID. */
 export function saveDaemonPid(agentName: string, pid: number): void {
-  ensureDir(agentDir(agentName));
-  writeFileSecure(daemonPidPath(agentName), String(pid));
+  ensureDir(_agentDir(agentName));
+  writeFileSecure(daemonPidPath(agentName, getActivePlugin()), String(pid));
 }
 
 /** Clear the daemon PID file. Silently fails on error. */
 export function clearDaemonPid(agentName: string): void {
-  const filePath = daemonPidPath(agentName);
+  const filePath = daemonPidPath(agentName, getActivePlugin());
   if (fs.existsSync(filePath)) {
     try {
       fs.unlinkSync(filePath);
@@ -400,8 +400,7 @@ export function clearDaemonPid(agentName: string): void {
 
 /**
  * Get the name of the currently active plugin.
- * Reads from state.json; defaults to "astranova" for backward compatibility
- * with state.json files written before plugin support was added.
+ * Reads from state.json; defaults to "astranova".
  */
 export function getActivePlugin(): string {
   return loadState()?.activePlugin ?? "astranova";
@@ -419,7 +418,7 @@ export function setActivePlugin(name: string): void {
 /**
  * Load a plugin manifest by name.
  * - "astranova" always returns the built-in ASTRANOVA_MANIFEST.
- * - Other names: read from ~/.config/astranova/plugins/<name>/manifest.json.
+ * - Other names: read from ~/.config/astra/plugins/<name>/manifest.json.
  * - Returns null if the plugin is not installed.
  */
 export function loadPluginManifest(name: string): PluginManifest | null {
@@ -442,18 +441,17 @@ export function loadPluginManifest(name: string): PluginManifest | null {
 // Agent Discovery
 // ---------------------------------------------------------------------------
 
-/** List all agent names that have credentials saved locally. */
+/** List all agent names that have credentials saved in the active plugin's space. */
 export function listAgents(): string[] {
-  const agentsDir = path.join(getRoot(), "agents");
-  if (!fs.existsSync(agentsDir)) {
-    return [];
-  }
+  const plugin = getActivePlugin();
+  const agentsDir = path.join(getRoot(), "spaces", plugin, "agents");
+  if (!fs.existsSync(agentsDir)) return [];
 
   return fs
     .readdirSync(agentsDir, { withFileTypes: true })
     .filter((entry) => {
       if (!entry.isDirectory()) return false;
-      return fs.existsSync(credentialsPath(entry.name));
+      return fs.existsSync(credentialsPath(entry.name, plugin));
     })
     .map((entry) => entry.name);
 }

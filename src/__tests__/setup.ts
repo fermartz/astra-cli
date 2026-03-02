@@ -23,12 +23,12 @@ export function setupFakeAgent(
   agentName: string,
   opts?: { withWallet?: boolean; withBoardPost?: boolean },
 ): void {
-  const agentsDir = path.join(testDir, "agents", agentName);
-  fs.mkdirSync(agentsDir, { recursive: true });
+  const agentPath = path.join(testDir, "spaces", "astranova", "agents", agentName);
+  fs.mkdirSync(agentPath, { recursive: true });
 
   // Write credentials
   fs.writeFileSync(
-    path.join(agentsDir, "credentials.json"),
+    path.join(agentPath, "credentials.json"),
     JSON.stringify({
       agent_name: agentName,
       api_key: "astra_test_key_12345",
@@ -41,7 +41,7 @@ export function setupFakeAgent(
     // Generate a deterministic fake wallet (not real keys, just for structure validation)
     const fakeSecretKey = Array.from({ length: 64 }, (_, i) => i);
     fs.writeFileSync(
-      path.join(agentsDir, "wallet.json"),
+      path.join(agentPath, "wallet.json"),
       JSON.stringify({
         publicKey: "FakePublicKey111111111111111111111111111111111",
         secretKey: fakeSecretKey,
@@ -52,22 +52,24 @@ export function setupFakeAgent(
 
   if (opts?.withBoardPost) {
     fs.writeFileSync(
-      path.join(agentsDir, "board_posted"),
+      path.join(agentPath, "board_posted"),
       new Date().toISOString(),
     );
   }
 
-  // Set as active agent
-  fs.writeFileSync(path.join(testDir, "active_agent"), agentName);
+  // Set as active agent in state.json (no active_agent flat file)
   fs.writeFileSync(
     path.join(testDir, "state.json"),
     JSON.stringify({
-      activeAgent: agentName,
+      activePlugin: "astranova",
+      activeAgents: { astranova: agentName },
       agents: {
-        [agentName]: {
-          status: "active",
-          journeyStage: "verified",
-          createdAt: new Date().toISOString(),
+        astranova: {
+          [agentName]: {
+            status: "active",
+            journeyStage: "verified",
+            createdAt: new Date().toISOString(),
+          },
         },
       },
     }),
@@ -93,7 +95,7 @@ export function setupTestConfig(overrides?: Record<string, unknown>): void {
 
 beforeEach(() => {
   testDir = fs.mkdtempSync(path.join(os.tmpdir(), "astra-test-"));
-  fs.mkdirSync(path.join(testDir, "agents"), { recursive: true });
+  fs.mkdirSync(path.join(testDir, "spaces", "astranova", "agents"), { recursive: true });
   fs.mkdirSync(path.join(testDir, ".cache"), { recursive: true });
   process.env.ASTRA_TEST_DIR = testDir;
   // Set the active plugin manifest so tools and remote context can resolve the apiBase/allowedPaths.

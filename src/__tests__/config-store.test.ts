@@ -74,27 +74,30 @@ describe("Config Store", () => {
 
     it("saveState / loadState round-trip", () => {
       const state: State = {
-        activeAgent: "test-agent",
+        activePlugin: "astranova",
+        activeAgents: { astranova: "test-agent" },
         agents: {
-          "test-agent": {
-            status: "active",
-            journeyStage: "verified",
-            createdAt: "2026-01-01T00:00:00Z",
+          astranova: {
+            "test-agent": {
+              status: "active",
+              journeyStage: "verified",
+              createdAt: "2026-01-01T00:00:00Z",
+            },
           },
         },
       };
       saveState(state);
       const loaded = loadState();
-      expect(loaded!.activeAgent).toBe("test-agent");
-      expect(loaded!.agents["test-agent"].journeyStage).toBe("verified");
+      expect(loaded!.activeAgents["astranova"]).toBe("test-agent");
+      expect(loaded!.agents["astranova"]["test-agent"].journeyStage).toBe("verified");
     });
 
     it("updateAgentState merges updates", () => {
       setupFakeAgent("test-agent");
       updateAgentState("test-agent", { journeyStage: "trading", status: "active" });
       const state = loadState();
-      expect(state!.agents["test-agent"].journeyStage).toBe("trading");
-      expect(state!.agents["test-agent"].status).toBe("active");
+      expect(state!.agents["astranova"]["test-agent"].journeyStage).toBe("trading");
+      expect(state!.agents["astranova"]["test-agent"].status).toBe("active");
     });
   });
 

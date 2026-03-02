@@ -182,16 +182,20 @@ async function main(): Promise<void> {
     fetchRemoteContext("API.md").then((c) => c ?? ""),
   ]);
 
-  // Step 5: Ensure state.json exists (migrate from legacy active_agent if needed)
+  // Step 5: Ensure state.json exists with the current plugin/agent
   if (!loadState()) {
+    const plugin = activePluginName;
     saveState({
-      activeAgent: agentName,
+      activePlugin: plugin,
+      activeAgents: { [plugin]: agentName },
       agents: {
-        [agentName]: {
-          status: apiStatus?.status ?? "unknown",
-          journeyStage: "fresh",
-          createdAt: new Date().toISOString(),
-          verificationCode: onboardingResult?.verificationCode ?? apiStatus?.verificationCode,
+        [plugin]: {
+          [agentName]: {
+            status: apiStatus?.status ?? "unknown",
+            journeyStage: "fresh",
+            createdAt: new Date().toISOString(),
+            verificationCode: onboardingResult?.verificationCode ?? apiStatus?.verificationCode,
+          },
         },
       },
     });
