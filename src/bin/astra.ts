@@ -35,7 +35,7 @@ import { loadLatestSession, pruneOldSessions, newSessionId } from "../config/ses
 import { loadMemory } from "../tools/memory.js";
 import { loadStrategy } from "../tools/strategy.js";
 import { runDaemon } from "../daemon/autopilot-worker.js";
-import { addPlugin, listInstalledPlugins, runPluginsPicker } from "../domain/loader.js";
+import { addPlugin, listInstalledPlugins, runPluginsPicker, loadPluginMap } from "../domain/loader.js";
 import { PLUGIN_REGISTRY } from "../domain/registry.js";
 import App from "../ui/App.js";
 
@@ -139,6 +139,9 @@ async function main(): Promise<void> {
 
   // Set the active manifest before any tool or remote context call
   setActiveManifest(manifest);
+
+  // Load plugin-map for non-AstraNova plugins (status bar + command hints)
+  const pluginMap = activePluginName === "astranova" ? null : loadPluginMap(activePluginName);
 
   // Daemon mode — skip onboarding + TUI, run background worker
   if (isDaemonMode) {
@@ -326,6 +329,7 @@ async function main(): Promise<void> {
       initialAutopilotConfig,
       initialPendingTrades,
       debug,
+      pluginMap,
     }),
   );
 

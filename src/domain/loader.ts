@@ -5,9 +5,24 @@ import { execFileSync } from "node:child_process";
 import * as clack from "@clack/prompts";
 import { PluginManifestSchema, type PluginManifest } from "./plugin.js";
 import { validatePluginUrl, validateAllowedPaths, scanForInjection } from "./validator.js";
-import { pluginDir, pluginManifestPath, pluginSkillPath, ensureDir, getRoot } from "../config/paths.js";
+import { pluginDir, pluginManifestPath, pluginSkillPath, pluginMapPath, ensureDir, getRoot } from "../config/paths.js";
 import { setActivePlugin, getActivePlugin, loadState } from "../config/store.js";
 import { PLUGIN_REGISTRY } from "./registry.js";
+
+// ─── Plugin Map Types ──────────────────────────────────────────────────
+
+export interface PluginStatusField {
+  path: string;   // dot-path into API response, e.g. "stats.post_count"
+  label: string;  // display label
+  color: string;  // ink color string
+}
+
+export interface PluginMap {
+  version: 1;
+  pluginName: string;
+  status?: { poll: string; fields: PluginStatusField[] };
+  commands?: Array<{ command: string; description: string }>;
+}
 
 const MAX_SKILL_MD_BYTES = 1_024 * 1_024; // 1 MB
 const FETCH_TIMEOUT_MS = 10_000; // 10 seconds
@@ -205,10 +220,64 @@ function writeFileSecure(filePath: string, data: string): void {
   fs.renameSync(tmpPath, filePath);
 }
 
-function savePluginToDisk(manifest: PluginManifest, skillMdContent: string): void {
+function buildPluginMap(
+  pluginName: string,
+  manifest: PluginManifest,
+  sections: Record<string, SectionData>,
+): PluginMap {
+  const map: PluginMap = { version: 1, pluginName };
+
+  // ENGINE:STATUS
+  const statusSection = sections["STATUS"];
+  if (statusSection) {
+    const poll = typeof statusSection.poll === "string" ? statusSection.poll.trim() : null;
+    const rawFields = Array.isArray(statusSection.fields) ? statusSection.fields : [];
+    const fields: PluginStatusField[] = rawFields.flatMap((raw) => {
+      const parts = (raw as string).split("|").map((s) => s.trim());
+      if (parts.length === 3) return [{ path: parts[0], label: parts[1], color: parts[2] }];
+      return [];
+    });
+    // Security: poll path must be within manifest's allowedPaths
+    const pollAllowed = poll && manifest.allowedPaths.some((ap) => poll.startsWith(ap));
+    if (poll && pollAllowed && fields.length > 0) {
+      map.status = { poll, fields };
+    }
+  }
+
+  // ENGINE:COMMANDS
+  const cmdSection = sections["COMMANDS"];
+  if (cmdSection) {
+    const rawCmds = Array.isArray(cmdSection.commands) ? cmdSection.commands : [];
+    map.commands = rawCmds.flatMap((raw) => {
+      const match = (raw as string).match(/^(\S+)\s{2,}(.+)$/);
+      if (match) return [{ command: match[1], description: match[2].trim() }];
+      return [];
+    });
+  }
+
+  return map;
+}
+
+export function loadPluginMap(pluginName: string): PluginMap | null {
+  const p = pluginMapPath(pluginName);
+  if (!fs.existsSync(p)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf-8")) as PluginMap;
+  } catch {
+    return null;
+  }
+}
+
+function savePluginToDisk(
+  manifest: PluginManifest,
+  skillMdContent: string,
+  sections: Record<string, SectionData>,
+): void {
   ensureDir(pluginDir(manifest.name));
   writeFileSecure(pluginManifestPath(manifest.name), JSON.stringify(manifest, null, 2));
   writeFileSecure(pluginSkillPath(manifest.name), skillMdContent);
+  const pluginMap = buildPluginMap(manifest.name, manifest, sections);
+  writeFileSecure(pluginMapPath(manifest.name), JSON.stringify(pluginMap, null, 2));
 }
 
 // ─── Public API ────────────────────────────────────────────────────────
@@ -350,7 +419,7 @@ export async function addPlugin(manifestUrl: string): Promise<void> {
   // Attach the original install URL so future skill.md refreshes use the right source.
   const manifestWithSkillUrl: PluginManifest = { ...manifest, skillUrl: urlResult.url.toString() };
   try {
-    savePluginToDisk(manifestWithSkillUrl, skillMdContent);
+    savePluginToDisk(manifestWithSkillUrl, skillMdContent, sections);
   } catch (err) {
     clack.log.error(
       `Failed to save plugin: ${err instanceof Error ? err.message : String(err)}`,

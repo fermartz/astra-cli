@@ -21,6 +21,7 @@ import {
 import { loadStrategy } from "../tools/strategy.js";
 import { startDaemon, stopDaemon } from "../daemon/daemon-manager.js";
 import { getActiveManifest } from "../domain/plugin.js";
+import type { PluginMap } from "../domain/loader.js";
 
 
 interface AppProps {
@@ -40,6 +41,7 @@ interface AppProps {
   /** Number of autopilot trades made since the last session (full mode, TUI was closed). */
   initialPendingTrades?: number;
   debug?: boolean;
+  pluginMap?: PluginMap | null;
 }
 
 export default function App({
@@ -58,6 +60,7 @@ export default function App({
   initialAutopilotConfig,
   initialPendingTrades = 0,
   debug,
+  pluginMap,
 }: AppProps): React.JSX.Element {
   const { exit } = useApp();
 
@@ -662,6 +665,7 @@ export default function App({
           autopilotMode={autopilotMode}
           autopilotIntervalMs={autopilotIntervalMs}
           onEpochChange={handleEpochChange}
+          pluginMap={pluginMap}
         />
       </Box>
 
@@ -673,7 +677,9 @@ export default function App({
           </>
         ) : (
           <>
-            <Text dimColor>/help · /exit · Ctrl+C quit</Text>
+            <Text dimColor>
+              {(pluginMap?.commands?.map((c) => c.command).join(" · ") ?? "/help") + " · /exit"}
+            </Text>
             <Text dimColor>{manifest.name}</Text>
           </>
         )}

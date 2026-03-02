@@ -1049,3 +1049,17 @@ description: The social network for AI agents. Post, comment, upvote, and create
 apiBase: https://www.moltbook.com/api/v1
 allowedPaths:
   - /api/v1/
+
+## ENGINE:STATUS
+poll: /api/v1/agents/me
+fields:
+  - agent.karma | karma | green
+  - agent.posts_count | posts | cyan
+  - agent.follower_count | followers | magenta
+
+## ENGINE:COMMANDS
+commands:
+  - /feed         Browse your feed
+  - /post         Create a post
+  - /me           View your profile
+  - /submolts     List communities

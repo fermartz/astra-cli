@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { apiCall } from "../utils/http.js";
 import type { JourneyStage } from "../agent/system-prompt.js";
 import type { AutopilotMode } from "../autopilot/scheduler.js";
+import type { PluginMap } from "../domain/loader.js";
 import { formatInterval } from "../autopilot/scheduler.js";
 
 interface StatusBarProps {
@@ -14,6 +15,7 @@ interface StatusBarProps {
   autopilotMode?: AutopilotMode;
   autopilotIntervalMs?: number;
   onEpochChange?: (epochId: number) => void;
+  pluginMap?: PluginMap | null;
 }
 
 interface MarketState {
@@ -45,12 +47,35 @@ const StatusBar = React.memo(function StatusBar({
   autopilotMode = "off",
   autopilotIntervalMs = 300_000,
   onEpochChange,
+  pluginMap,
 }: StatusBarProps): React.JSX.Element {
   // Single state object to batch market + portfolio updates into one render
   const [data, setData] = useState<BarData>({ market: null, portfolio: null });
   const mounted = useRef(true);
   // Market/portfolio data only makes sense for AstraNova (journey stages, $SIM/$NOVA)
   const canFetchData = isAstraNova && journeyStage !== "fresh" && journeyStage !== "pending";
+
+  // Generic plugin status polling (non-AstraNova only)
+  const [pluginData, setPluginData] = useState<Record<string, unknown> | null>(null);
+  const mountedPlugin = useRef(true); // separate ref — never shared with AstraNova effect
+
+  useEffect(() => {
+    if (isAstraNova || !pluginMap?.status) return;
+    mountedPlugin.current = true;
+
+    const fetchPlugin = async () => {
+      const result = await apiCall("GET", pluginMap.status!.poll, undefined, agentName);
+      if (!result.ok || !mountedPlugin.current) return;
+      setPluginData(result.data as Record<string, unknown>);
+    };
+
+    void fetchPlugin();
+    const interval = setInterval(() => void fetchPlugin(), POLL_INTERVAL_MS);
+    return () => {
+      mountedPlugin.current = false;
+      clearInterval(interval);
+    };
+  }, [isAstraNova, pluginMap, agentName]);
 
   const poll = useCallback(async () => {
     const [marketRes, portfolioRes] = await Promise.all([
@@ -94,6 +119,24 @@ const StatusBar = React.memo(function StatusBar({
         </Text>
         <Text dimColor> │ </Text>
         <Text color="#ff8800">{agentName}</Text>
+
+        {!isAstraNova && pluginData && pluginMap?.status?.fields.map((field) => {
+          const value = getNestedValue(pluginData, field.path);
+          if (value == null) return null;
+          return (
+            <React.Fragment key={field.path}>
+              <Text dimColor> │ </Text>
+              <Text color={field.color}>{field.label}: {String(value)}</Text>
+            </React.Fragment>
+          );
+        })}
+
+        {!isAstraNova && !pluginData && pluginMap?.status && (
+          <>
+            <Text dimColor> │ </Text>
+            <Text dimColor>loading...</Text>
+          </>
+        )}
 
         {canFetchData && market && (
           <>
@@ -180,6 +223,16 @@ function moodColor(mood: string): string {
     default:
       return "white";
   }
+}
+
+// ─── Utilities ─────────────────────────────────────────────────────────
+
+function getNestedValue(obj: unknown, path: string): unknown {
+  return path.split(".").reduce(
+    (cur, key) =>
+      cur && typeof cur === "object" ? (cur as Record<string, unknown>)[key] : undefined,
+    obj,
+  );
 }
 
 // ─── API Fetchers ──────────────────────────────────────────────────────

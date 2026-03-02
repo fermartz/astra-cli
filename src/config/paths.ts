@@ -118,6 +118,11 @@ export function pluginSkillPath(pluginName: string): string {
   return path.join(pluginDir(pluginName), "skill.md");
 }
 
+/** Path to a plugin's generated plugin-map.json (status + command hints for the TUI). */
+export function pluginMapPath(pluginName: string): string {
+  return path.join(pluginDir(pluginName), "plugin-map.json");
+}
+
 /**
  * Ensure a directory exists. Creates it recursively if needed.
  * Applies chmod 700 to the root dir and all spaces subdirectories (owner-only access).
