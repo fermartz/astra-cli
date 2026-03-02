@@ -282,7 +282,7 @@ export default function App({
           setChatMessages((prev) => [
             ...prev,
             { role: "user", content: userText },
-            { role: "assistant", content: "Opening plugin browser..." },
+            { role: "assistant", content: "Opening plugin picker..." },
           ]);
           requestPluginsPicker();
           setTimeout(() => exit(), 800);

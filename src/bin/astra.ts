@@ -132,13 +132,6 @@ async function main(): Promise<void> {
   // Set the active manifest before any tool or remote context call
   setActiveManifest(manifest);
 
-  // Plugins-picker intercept — requested by /plugins TUI command
-  if (isPluginsPickerRequested()) {
-    clearPluginsPickerFlag();
-    await runPluginsPicker();
-    process.exit(0);
-  }
-
   // Daemon mode — skip onboarding + TUI, run background worker
   if (isDaemonMode) {
     await runDaemon();
@@ -310,6 +303,13 @@ async function main(): Promise<void> {
   );
 
   await waitUntilExit();
+
+  // Check if the plugins picker was requested (by /plugins TUI command)
+  if (isPluginsPickerRequested()) {
+    clearPluginsPickerFlag();
+    await runPluginsPicker();
+    process.exit(0);
+  }
 
   // Check if a restart was requested (agent switch/create)
   if (isRestartRequested()) {
