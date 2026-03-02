@@ -6,6 +6,7 @@ import {
   loadWallet,
   saveCredentials,
   getActiveAgent,
+  getActivePlugin,
   listAgents,
 } from "../config/store.js";
 import { agentDir, ensureDir } from "../config/paths.js";
@@ -105,7 +106,7 @@ export const writeConfigTool = tool({
       };
     }
 
-    const dir = agentDir(agentName);
+    const dir = agentDir(agentName, getActivePlugin());
     ensureDir(dir);
 
     const filePath = path.join(dir, `${file}.json`);

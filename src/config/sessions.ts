@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { CoreMessage } from "ai";
 import { sessionsDir, ensureDir } from "./paths.js";
+import { getActivePlugin } from "./store.js";
 
 const MAX_MESSAGES = 100;
 const MAX_SESSIONS = 3;
@@ -71,7 +72,7 @@ export function saveSession(params: {
   chatMessages: Array<{ role: string; content: string }>;
 }): void {
   try {
-    const dir = sessionsDir(params.agentName);
+    const dir = sessionsDir(params.agentName, getActivePlugin());
     ensureDir(dir);
 
     const data: SessionData = {
@@ -101,7 +102,7 @@ export function saveSession(params: {
  * Returns null if no sessions exist or the latest is too old.
  */
 export function loadLatestSession(agentName: string): SessionData | null {
-  const dir = sessionsDir(agentName);
+  const dir = sessionsDir(agentName, getActivePlugin());
   if (!fs.existsSync(dir)) return null;
 
   const files = fs.readdirSync(dir)
@@ -132,7 +133,7 @@ export function loadLatestSession(agentName: string): SessionData | null {
  * Keeps only the last MAX_SESSIONS files and deletes anything older than MAX_AGE_MS.
  */
 export function pruneOldSessions(agentName: string): void {
-  const dir = sessionsDir(agentName);
+  const dir = sessionsDir(agentName, getActivePlugin());
   if (!fs.existsSync(dir)) return;
 
   try {

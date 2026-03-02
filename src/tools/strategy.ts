@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import { tool } from "ai";
 import { z } from "zod";
-import { getActiveAgent } from "../config/store.js";
+import { getActiveAgent, getActivePlugin } from "../config/store.js";
 import { agentDir, strategyPath, ensureDir } from "../config/paths.js";
 
 const MAX_STRATEGY_CHARS = 4000;
@@ -32,8 +32,8 @@ export const writeStrategyTool = tool({
     }
 
     try {
-      ensureDir(agentDir(agentName));
-      fs.writeFileSync(strategyPath(agentName), content, { encoding: "utf-8", mode: 0o600 });
+      ensureDir(agentDir(agentName, getActivePlugin()));
+      fs.writeFileSync(strategyPath(agentName, getActivePlugin()), content, { encoding: "utf-8", mode: 0o600 });
       return { ok: true, chars: content.length };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -54,7 +54,7 @@ export const readStrategyTool = tool({
     const agentName = getActiveAgent();
     if (!agentName) return { error: "No active agent." };
 
-    const filePath = strategyPath(agentName);
+    const filePath = strategyPath(agentName, getActivePlugin());
     if (!fs.existsSync(filePath)) {
       return {
         error:
@@ -77,7 +77,7 @@ export const readStrategyTool = tool({
  * Returns "" if no strategy exists. Never throws.
  */
 export function loadStrategy(agentName: string): string {
-  const filePath = strategyPath(agentName);
+  const filePath = strategyPath(agentName, getActivePlugin());
   if (!fs.existsSync(filePath)) return "";
   try {
     return fs.readFileSync(filePath, "utf-8");

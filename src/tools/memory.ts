@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { tool } from "ai";
 import { z } from "zod";
 import { memoryPath, ensureDir, agentDir } from "../config/paths.js";
-import { getActiveAgent } from "../config/store.js";
+import { getActiveAgent, getActivePlugin } from "../config/store.js";
 
 const MAX_MEMORY_CHARS = 2000;
 
@@ -37,8 +37,8 @@ export const updateMemoryTool = tool({
     }
 
     try {
-      ensureDir(agentDir(agentName));
-      const filePath = memoryPath(agentName);
+      ensureDir(agentDir(agentName, getActivePlugin()));
+      const filePath = memoryPath(agentName, getActivePlugin());
       fs.writeFileSync(filePath, content, { encoding: "utf-8", mode: 0o600 });
       return { ok: true, chars: content.length };
     } catch (err: unknown) {
@@ -53,7 +53,7 @@ export const updateMemoryTool = tool({
  * Returns empty string if no memory file exists.
  */
 export function loadMemory(agentName: string): string {
-  const filePath = memoryPath(agentName);
+  const filePath = memoryPath(agentName, getActivePlugin());
   if (!fs.existsSync(filePath)) return "";
   try {
     return fs.readFileSync(filePath, "utf-8");
