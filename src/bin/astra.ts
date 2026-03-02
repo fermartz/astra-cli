@@ -138,10 +138,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Clear any stale restart flag from a previous session that wasn't consumed
-  if (isRestartRequested()) {
-    clearRestartFlag();
-  }
+  // Clear any stale flags from a previous session that wasn't consumed
+  if (isRestartRequested()) clearRestartFlag();
+  if (isPluginsPickerRequested()) clearPluginsPickerFlag();
 
   // Activate debug logging in agent loop when --debug flag is set
   if (debug) {
