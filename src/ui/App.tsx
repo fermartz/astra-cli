@@ -656,6 +656,7 @@ export default function App({
       <Box flexShrink={0} width="100%">
         <StatusBar
           agentName={agentName}
+          pluginName={manifest.name}
           journeyStage={profile.journeyStage ?? "full"}
           autopilotMode={autopilotMode}
           autopilotIntervalMs={autopilotIntervalMs}

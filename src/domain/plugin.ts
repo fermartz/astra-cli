@@ -26,6 +26,12 @@ export const PluginManifestSchema = z.object({
    */
   tagline: z.string().optional(),
   /**
+   * URL where skill.md is hosted (the original install URL).
+   * Used to refresh skill.md context. Saved automatically by addPlugin().
+   * If absent, the locally installed copy is used without a network fetch.
+   */
+  skillUrl: z.string().url().optional(),
+  /**
    * Optional engine extension flags — declared by built-in plugins that need
    * features beyond the base engine (api_call, memory, config, wallet).
    * Third-party plugins leave this unset; the TUI hides extension-specific UI.

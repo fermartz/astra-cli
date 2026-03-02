@@ -347,8 +347,10 @@ export async function addPlugin(manifestUrl: string): Promise<void> {
   }
 
   // Step 8 — Save to disk (manifest.json + skill.md, both chmod 600)
+  // Attach the original install URL so future skill.md refreshes use the right source.
+  const manifestWithSkillUrl: PluginManifest = { ...manifest, skillUrl: urlResult.url.toString() };
   try {
-    savePluginToDisk(manifest, skillMdContent);
+    savePluginToDisk(manifestWithSkillUrl, skillMdContent);
   } catch (err) {
     clack.log.error(
       `Failed to save plugin: ${err instanceof Error ? err.message : String(err)}`,
@@ -358,7 +360,7 @@ export async function addPlugin(manifestUrl: string): Promise<void> {
   }
 
   // Step 9 — Set as active plugin
-  setActivePlugin(manifest.name);
+  setActivePlugin(manifestWithSkillUrl.name);
 
   clack.outro(
     `Plugin "${manifest.name}" installed successfully.\nRun \`astra\` to load it, or \`astra --plugin ${manifest.name}\` for this session only.`,

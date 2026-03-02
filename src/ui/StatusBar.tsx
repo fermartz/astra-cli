@@ -7,6 +7,7 @@ import { formatInterval } from "../autopilot/scheduler.js";
 
 interface StatusBarProps {
   agentName: string;
+  pluginName: string;
   journeyStage: JourneyStage;
   autopilotMode?: AutopilotMode;
   autopilotIntervalMs?: number;
@@ -36,6 +37,7 @@ const POLL_INTERVAL_MS = 60_000; // 60 seconds
 
 const StatusBar = React.memo(function StatusBar({
   agentName,
+  pluginName,
   journeyStage,
   autopilotMode = "off",
   autopilotIntervalMs = 300_000,
@@ -84,7 +86,7 @@ const StatusBar = React.memo(function StatusBar({
       <Box paddingX={1} justifyContent="space-between">
         <Box>
         <Text bold color="#00ff00">
-          AstraNova
+          {pluginName}
         </Text>
         <Text dimColor> │ </Text>
         <Text color="#ff8800">{agentName}</Text>
