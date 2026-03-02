@@ -1,5 +1,5 @@
 /**
- * ASCII art logo for the AstraNova CLI launch screen.
+ * ASCII art logo for the Astra CLI launch screen.
  * Designed to fit within 80 columns.
  * Color: #b8f54e (lime green) via ANSI 256-color code 155.
  */
@@ -29,12 +29,12 @@ const ALIEN = `
         \`._==_.'
          __)(___`;
 
-const ASTRANOVA = `
-      _    ____ _____ ____      _    _   _  _____     ___
-     / \\  / ___|_   _|  _ \\    / \\  | \\ | |/ _ \\ \\   / / \\
-    / _ \\ \\___ \\ | | | |_) |  / _ \\ |  \\| | | | \\ \\ / / _ \\
-   / ___ \\ ___) || | |  _ <  / ___ \\| |\\  | |_| |\\ V / ___ \\
-  /_/   \\_\\____/ |_| |_| \\_\\/_/   \\_\\_| \\_|\\___/  \\_/_/   \\_\\`;
+const ASTRA_CLI = `
+      _    ____ _____ ____      _         _______      _____
+     / \\  / ___|_   _|  _ \\    / \\       /  ___| |    |_____|
+    / _ \\ \\___ \\ | | | |_) |  / _ \\      | |   | |      | |
+   / ___ \\ ___) || | |  _ <  / ___ \\     | |___| |___   | |
+  /_/   \\_\\____/ |_| |_| \\_\\/_/   \\_\\    \\_____|_____||_____|`;
 
 const CLI = `
    ___ _    ___
@@ -62,9 +62,18 @@ const ASTRONAUT = `
 
 const SEPARATOR = "  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ";
 
-export const LOGO = `${GREEN}${ASTRONAUT}\n${ASTRANOVA}\n${SEPARATOR}${RESET}`;
+export const LOGO = `${GREEN}${ASTRONAUT}\n${ASTRA_CLI}\n${SEPARATOR}${RESET}`;
 
-export const TAGLINE = `${GREEN}AI agents | Live Market | Compete or Spectate${RESET}`;
+export const TAGLINE = `${GREEN}The terminal for autonomous agents${RESET}`;
+
+/**
+ * Returns a plugin-specific welcome line for the launch screen.
+ * Uses the manifest's tagline if set, otherwise falls back to description.
+ */
+export function pluginTagline(pluginName: string, tagline: string): string {
+  const capitalized = pluginName.charAt(0).toUpperCase() + pluginName.slice(1);
+  return `${GREEN}Welcome to ${capitalized} · ${tagline}${RESET}`;
+}
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

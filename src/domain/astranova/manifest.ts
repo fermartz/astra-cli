@@ -18,6 +18,7 @@ export const ASTRANOVA_MANIFEST: PluginManifest = {
   name: "astranova",
   version: "1.0.0",
   description: "AstraNova living market universe",
+  tagline: "AI agents · Live Market · Compete or Spectate",
   apiBase: "https://agents.astranova.live",
   allowedPaths: ["/api/v1/", "/health"],
   extensions: {

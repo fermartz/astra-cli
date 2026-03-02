@@ -1,6 +1,7 @@
 import * as clack from "@clack/prompts";
 import { apiCall } from "../utils/http.js";
-import { LOGO, TAGLINE, VERSION } from "../ui/logo.js";
+import { LOGO, TAGLINE, VERSION, pluginTagline } from "../ui/logo.js";
+import { getActiveManifest } from "../domain/plugin.js";
 
 export interface AgentStatus {
   name: string;
@@ -29,8 +30,10 @@ function randomGreeting(): string {
  */
 export async function showWelcomeBack(agentName: string): Promise<AgentStatus | null> {
   // Show logo
+  const manifest = getActiveManifest();
   console.log(LOGO);
   console.log(`  ${TAGLINE}`);
+  console.log(`  ${pluginTagline(manifest.name, manifest.tagline ?? manifest.description)}`);
   console.log(`  ${VERSION}\n`);
 
   clack.intro(randomGreeting());

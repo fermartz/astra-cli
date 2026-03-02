@@ -21,6 +21,11 @@ export const PluginManifestSchema = z.object({
   /** Path prefixes the LLM is allowed to call via api_call. */
   allowedPaths: z.array(z.string()),
   /**
+   * Optional short marketing tagline shown on the welcome screen below the CLI logo.
+   * Falls back to description if not set.
+   */
+  tagline: z.string().optional(),
+  /**
    * Optional engine extension flags — declared by built-in plugins that need
    * features beyond the base engine (api_call, memory, config, wallet).
    * Third-party plugins leave this unset; the TUI hides extension-specific UI.

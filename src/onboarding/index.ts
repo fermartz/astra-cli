@@ -4,7 +4,7 @@ import { ensureBaseStructure } from "../config/paths.js";
 import type { Config } from "../config/schema.js";
 import { selectProvider } from "./provider.js";
 import { registerAgent } from "./register.js";
-import { LOGO, TAGLINE, VERSION } from "../ui/logo.js";
+import { LOGO, TAGLINE, VERSION, pluginTagline } from "../ui/logo.js";
 import { getActiveManifest } from "../domain/plugin.js";
 
 export interface OnboardingResult {
@@ -31,11 +31,12 @@ export async function runOnboarding(): Promise<OnboardingResult | null> {
   ensureBaseStructure();
 
   // Show logo
+  const manifest = getActiveManifest();
   console.log(LOGO);
   console.log(`  ${TAGLINE}`);
+  console.log(`  ${pluginTagline(manifest.name, manifest.tagline ?? manifest.description)}`);
   console.log(`  ${VERSION}\n`);
 
-  const manifest = getActiveManifest();
   clack.intro(manifest.description);
 
   // Step 1: Choose LLM provider and enter API key
