@@ -11,6 +11,7 @@ import {
   epochBudgetPath,
   autopilotLogPath,
   daemonPidPath,
+  pluginManifestPath,
   agentDir,
   ensureDir,
   ensureBaseStructure,
@@ -27,6 +28,8 @@ import {
   type State,
   type AgentState,
 } from "./schema.js";
+import { PluginManifestSchema, type PluginManifest } from "../domain/plugin.js";
+import { ASTRANOVA_MANIFEST } from "../domain/astranova/manifest.js";
 
 /**
  * Write a file atomically: write to a temp file in the same directory,
@@ -397,20 +400,42 @@ export function clearDaemonPid(agentName: string): void {
 
 /**
  * Get the name of the currently active plugin.
- * Phase 1: always "astranova" (single plugin).
- * Phase 2: will read from state.json after `astra add` support is added.
+ * Reads from state.json; defaults to "astranova" for backward compatibility
+ * with state.json files written before plugin support was added.
  */
 export function getActivePlugin(): string {
-  return "astranova";
+  return loadState()?.activePlugin ?? "astranova";
 }
 
 /**
- * Set the active plugin by name.
- * Phase 1: no-op (single plugin, no switching yet).
- * Phase 2: will persist to state.json.
+ * Set the active plugin by name. Persists to state.json.
  */
-export function setActivePlugin(_name: string): void {
-  // Phase 2: saveState({ ...loadState()!, activePlugin: _name });
+export function setActivePlugin(name: string): void {
+  const state = loadState();
+  if (!state) return;
+  saveState({ ...state, activePlugin: name });
+}
+
+/**
+ * Load a plugin manifest by name.
+ * - "astranova" always returns the built-in ASTRANOVA_MANIFEST.
+ * - Other names: read from ~/.config/astranova/plugins/<name>/manifest.json.
+ * - Returns null if the plugin is not installed.
+ */
+export function loadPluginManifest(name: string): PluginManifest | null {
+  if (name === "astranova") return ASTRANOVA_MANIFEST;
+
+  const filePath = pluginManifestPath(name);
+  if (!fs.existsSync(filePath)) return null;
+
+  try {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const data: unknown = JSON.parse(raw);
+    const result = PluginManifestSchema.safeParse(data);
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -113,6 +113,16 @@ export function pluginDir(pluginName: string): string {
   return path.join(_root(), "plugins", pluginName);
 }
 
+/** Path to a plugin's saved manifest (parsed from skill.md ENGINE:META). */
+export function pluginManifestPath(pluginName: string): string {
+  return path.join(pluginDir(pluginName), "manifest.json");
+}
+
+/** Path to a plugin's saved skill.md content (raw, used as LLM context). */
+export function pluginSkillPath(pluginName: string): string {
+  return path.join(pluginDir(pluginName), "skill.md");
+}
+
 /**
  * Ensure a directory exists. Creates it recursively if needed.
  * Applies chmod 700 to the astranova root dir (owner-only access).

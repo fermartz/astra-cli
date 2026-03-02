@@ -110,11 +110,16 @@ export const AgentStateSchema = z.object({
 export type AgentState = z.infer<typeof AgentStateSchema>;
 
 /**
- * Global CLI state — tracks active agent and per-agent metadata.
+ * Global CLI state — tracks active agent, active plugin, and per-agent metadata.
  * Stored at ~/.config/astranova/state.json
+ *
+ * activePlugin is optional for backward compatibility with existing state.json files
+ * that were written before the plugin architecture was added. Missing activePlugin
+ * defaults to "astranova" at runtime in getActivePlugin().
  */
 export const StateSchema = z.object({
   activeAgent: z.string(),
+  activePlugin: z.string().optional(),
   agents: z.record(z.string(), AgentStateSchema).default({}),
 });
 

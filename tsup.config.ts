@@ -7,6 +7,9 @@ export default defineConfig({
   outDir: "dist",
   clean: true,
   sourcemap: true,
+  // Keep the single-file bundle (dist/astra.js) — dynamic imports would create extra chunks
+  // that aren't included in the npm package files list.
+  noSplitting: true,
   banner: {
     js: "#!/usr/bin/env node",
   },

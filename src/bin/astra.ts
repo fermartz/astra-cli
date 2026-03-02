@@ -18,6 +18,8 @@ import {
   clearRestartFlag,
   loadAutopilotConfig,
   loadAutopilotLogSince,
+  getActivePlugin,
+  loadPluginManifest,
 } from "../config/store.js";
 import { ensureBaseStructure } from "../config/paths.js";
 import { runOnboarding } from "../onboarding/index.js";
@@ -29,6 +31,7 @@ import { loadLatestSession, pruneOldSessions, newSessionId } from "../config/ses
 import { loadMemory } from "../tools/memory.js";
 import { loadStrategy } from "../tools/strategy.js";
 import { runDaemon } from "../daemon/autopilot-worker.js";
+import { addPlugin } from "../domain/loader.js";
 import App from "../ui/App.js";
 
 /**
@@ -65,10 +68,6 @@ function detectJourneyStage(params: {
 
 
 async function main(): Promise<void> {
-  // Set the active plugin manifest before any tool or remote context call.
-  // Phase 2: load from state.json to support plugin switching.
-  setActiveManifest(ASTRANOVA_MANIFEST);
-
   ensureBaseStructure();
 
   // Parse CLI args
@@ -76,6 +75,43 @@ async function main(): Promise<void> {
   const shouldContinue = args.includes("--continue") || args.includes("-c");
   const debug = args.includes("--debug") || args.includes("-d");
   const isDaemonMode = args.includes("--daemon");
+
+  // --add <url>: install a plugin and exit (no TUI needed)
+  const addIdx = args.indexOf("--add");
+  if (addIdx !== -1) {
+    const addUrl = args[addIdx + 1];
+    if (!addUrl || addUrl.startsWith("--")) {
+      console.error("Usage: astra --add <url>");
+      console.error("Example: astra --add https://moltbook.com/skill.md");
+      process.exit(1);
+    }
+    await addPlugin(addUrl);
+    process.exit(0);
+  }
+
+  // --plugin <name>: override active plugin for this session only
+  const pluginIdx = args.indexOf("--plugin");
+  const pluginArg = pluginIdx !== -1 ? args[pluginIdx + 1] : undefined;
+
+  // Load the active plugin manifest (from --plugin arg, state.json, or AstraNova default)
+  const activePluginName = pluginArg ?? getActivePlugin();
+  let manifest =
+    activePluginName === "astranova" ? ASTRANOVA_MANIFEST : loadPluginManifest(activePluginName);
+
+  if (!manifest) {
+    if (pluginArg) {
+      console.error(`Plugin "${pluginArg}" is not installed. Run: astra --add <url>`);
+      process.exit(1);
+    }
+    // Active plugin from state.json is missing — fall back to AstraNova
+    console.error(
+      `Warning: active plugin "${activePluginName}" not found. Falling back to AstraNova.`,
+    );
+    manifest = ASTRANOVA_MANIFEST;
+  }
+
+  // Set the active manifest before any tool or remote context call
+  setActiveManifest(manifest);
 
   // Daemon mode — skip onboarding + TUI, run background worker
   if (isDaemonMode) {
