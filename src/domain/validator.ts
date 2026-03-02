@@ -17,7 +17,9 @@ const INJECTION_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /ignore previous instructions/i, label: "ignore-previous-instructions" },
   { pattern: /you are now/i, label: "persona-override" },
   { pattern: /disregard.*(?:system|instructions)/i, label: "disregard-system" },
-  { pattern: /send.*api[\s._-]*key/i, label: "credential-exfiltration" },
+  // Match lines with "send...api key" but not when a negation word appears on the same line
+  // (e.g. "NEVER send your API key" is a security warning, not exfiltration)
+  { pattern: /^(?!.*\b(?:never|not|don't|do\s+not|avoid|refuse)\b).*\bsend\b.*\bapi[\s._-]*key/im, label: "credential-exfiltration" },
   { pattern: /exfiltrate/i, label: "data-exfiltration" },
   { pattern: /override.*(?:system|role)/i, label: "role-override" },
   { pattern: /forget.*instructions/i, label: "forget-instructions" },
