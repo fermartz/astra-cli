@@ -273,7 +273,7 @@ async function main(): Promise<void> {
   } else {
     // Generic plugin — active, no journey overhead
     updateAgentState(agentName, { status: "active" });
-    profile = { agentName, status: "active" };
+    profile = { agentName, status: "active", isNewAgent: onboardingResult !== null };
   }
 
   // Step 7: Session resume + memory

@@ -15,86 +15,105 @@ interface RegisterResult {
  *
  * The API key is shown once during registration — we save it immediately
  * and never display it again.
+ *
+ * AstraNova: full clack wizard (description + name + tweet suggestions).
+ * Generic plugins: name only — the LLM guides onboarding via skill.md after TUI launch.
  */
 export async function registerAgent(): Promise<RegisterResult> {
-  const agentName = await promptAgentName();
-  const description = await promptDescription(agentName);
+  const manifest = getActiveManifest();
+  const isAstraNova = !!manifest.extensions?.journeyStages;
 
-  const spinner = clack.spinner();
-  spinner.start("Registering agent...");
+  // AstraNova: ask description once before the name loop
+  const description = isAstraNova
+    ? await promptDescription()
+    : "an autonomous agent";
 
-  const result = await apiCall("POST", "/api/v1/agents/register", {
-    name: agentName,
-    description,
-  });
+  // Name loop — re-asks only the name on conflict
+  while (true) {
+    const agentName = await promptAgentName();
 
-  if (!result.ok) {
-    spinner.stop("Registration failed.");
+    const spinner = clack.spinner();
+    spinner.start("Registering agent...");
 
-    if (result.status === 409) {
-      clack.log.error(`The name "${agentName}" is already taken. Try a different name.`);
-      return registerAgent();
+    const result = await apiCall("POST", "/api/v1/agents/register", {
+      name: agentName,
+      description,
+    });
+
+    if (!result.ok) {
+      spinner.stop("Registration failed.");
+
+      if (result.status === 409) {
+        clack.log.error(`The name "${agentName}" is already taken. Pick a different name.`);
+        continue;
+      }
+      if (result.status === 429) {
+        clack.log.error("Too many registration attempts. Please try again later.");
+        process.exit(1);
+      }
+      clack.log.error(`Registration error: ${result.error}`);
+      if (result.hint) clack.log.info(result.hint);
+      continue;
     }
 
-    if (result.status === 429) {
-      clack.log.error("Too many registration attempts. Please try again later.");
-      process.exit(1);
+    const parsed = RegisterResponseSchema.safeParse(result.data);
+    if (!parsed.success) {
+      spinner.stop("Registration failed.");
+      clack.log.error("Unexpected response from API. Please try again.");
+      continue;
     }
 
-    clack.log.error(`Registration error: ${result.error}`);
-    if (result.hint) clack.log.info(result.hint);
-    return registerAgent();
+    const { agent, api_key, verification_code } = parsed.data;
+
+    // Save credentials immediately — api_key is shown once and never again
+    saveCredentials(agentName, {
+      agent_name: agentName,
+      api_key,
+      api_base: manifest.apiBase,
+    });
+    setActiveAgent(agentName);
+    spinner.stop(`Agent "${agent.name}" registered.`);
+
+    if (isAstraNova) {
+      clack.log.success(
+        [
+          `Agent: ${agent.name}`,
+          `Status: ${agent.status}`,
+          `Starting balance: ${agent.simBalance.toLocaleString()} $SIM`,
+          "",
+          `Your API key has been saved securely to your local machine.`,
+          `It will not be displayed again — it is stored with restricted`,
+          `permissions (chmod 600) and is never sent to the LLM.`,
+        ].join("\n"),
+      );
+
+      const tweetSuggestions = buildTweetSuggestions(agent.name, verification_code);
+      clack.log.info(
+        [
+          "To verify your agent, post a tweet tagging @astranova_live with your code.",
+          "",
+          "Here are some ready-to-post ideas:",
+          "",
+          ...tweetSuggestions.map((t, i) => `  ${i + 1}. ${t}`),
+          "",
+          "After posting, use the \"verify\" command in the chat with your tweet URL.",
+          "Verification unlocks trading and market access.",
+        ].join("\n"),
+      );
+    } else {
+      clack.log.success(
+        [
+          `Agent: ${agent.name}`,
+          "",
+          `Your API key has been saved securely to your local machine.`,
+          `It will not be displayed again — it is stored with restricted`,
+          `permissions (chmod 600) and is never sent to the LLM.`,
+        ].join("\n"),
+      );
+    }
+
+    return { agentName, verificationCode: verification_code };
   }
-
-  // Validate response shape
-  const parsed = RegisterResponseSchema.safeParse(result.data);
-  if (!parsed.success) {
-    spinner.stop("Registration failed.");
-    clack.log.error("Unexpected response from API. Please try again.");
-    return registerAgent();
-  }
-
-  const { agent, api_key, verification_code } = parsed.data;
-
-  // Save credentials immediately — api_key is shown once and never again
-  saveCredentials(agentName, {
-    agent_name: agentName,
-    api_key,
-    api_base: getActiveManifest().apiBase,
-  });
-
-  setActiveAgent(agentName);
-
-  spinner.stop(`Agent "${agent.name}" registered.`);
-
-  clack.log.success(
-    [
-      `Agent: ${agent.name}`,
-      `Status: ${agent.status}`,
-      `Starting balance: ${agent.simBalance.toLocaleString()} $SIM`,
-      "",
-      `Your API key has been saved securely to your local machine.`,
-      `It will not be displayed again — it is stored with restricted`,
-      `permissions (chmod 600) and is never sent to the LLM.`,
-    ].join("\n"),
-  );
-
-  const tweetSuggestions = buildTweetSuggestions(agent.name, verification_code);
-
-  clack.log.info(
-    [
-      "To verify your agent, post a tweet tagging @astranova_live with your code.",
-      "",
-      "Here are some ready-to-post ideas:",
-      "",
-      ...tweetSuggestions.map((t, i) => `  ${i + 1}. ${t}`),
-      "",
-      "After posting, use the \"verify\" command in the chat with your tweet URL.",
-      "Verification unlocks trading and market access.",
-    ].join("\n"),
-  );
-
-  return { agentName, verificationCode: verification_code };
 }
 
 /**
@@ -135,7 +154,7 @@ const DESCRIPTION_SUGGESTIONS_GENERIC = [
   "autonomous by design, intentional by choice",
 ];
 
-async function promptDescription(agentName: string): Promise<string> {
+async function promptDescription(): Promise<string> {
   const manifest = getActiveManifest();
   const pool = manifest.extensions?.journeyStages
     ? DESCRIPTION_SUGGESTIONS_ASTRANOVA
@@ -145,7 +164,7 @@ async function promptDescription(agentName: string): Promise<string> {
   const WRITE_OWN = "__write_own__";
 
   const choice = await clack.select({
-    message: `Give "${agentName}" a personality`,
+    message: "Give your agent a personality",
     options: [
       ...suggestions.map((d) => ({ value: d, label: d })),
       { value: WRITE_OWN, label: "Write my own" },

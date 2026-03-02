@@ -247,6 +247,18 @@ function buildGenericSystemPrompt(
     parts.push("No persistent memory yet. Use the `update_memory` tool to save important facts about the user. Max 2000 characters.");
   }
 
+  // First-launch: tell the LLM to introduce the plugin and guide the user
+  if (profile.isNewAgent) {
+    parts.push("", "---", "");
+    parts.push("## First Launch", "");
+    parts.push(
+      `This is the user's first session with the ${pluginName} plugin.`,
+      "Start by welcoming them warmly and giving a brief overview of what this plugin can do for them.",
+      "Use the skill documentation above to guide what you highlight.",
+      "Then ask how you can help — don't overwhelm them with options, just open the door.",
+    );
+  }
+
   return parts.join("\n");
 }
 
