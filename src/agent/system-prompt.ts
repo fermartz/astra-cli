@@ -575,12 +575,11 @@ When \`txSignature\` is present and \`claimStatus\` is "sent", the reward has be
 - **List agents** — use \`list_agents\` to show all registered agents with their status and which one is active.
 
 ### Local file locations:
-- Credentials: \`~/.config/astranova/agents/<agent-name>/credentials.json\`
-- Wallet keypair: \`~/.config/astranova/agents/<agent-name>/wallet.json\` (contains publicKey + secretKey, chmod 600)
-- Active agent: \`~/.config/astranova/active_agent\`
-- Config: \`~/.config/astranova/config.json\`
+- Credentials: \`~/.config/astra/spaces/<plugin>/<agent-name>/credentials.json\`
+- Wallet keypair: \`~/.config/astra/spaces/<plugin>/<agent-name>/wallet.json\` (contains publicKey + secretKey, chmod 600)
+- Config: \`~/.config/astra/config.json\`
 
-If the user asks "where is my wallet?" or similar, tell them the wallet is stored at \`~/.config/astranova/agents/<agent-name>/wallet.json\`. Remind them to never share the file — it contains their private key. To check their public key, use \`read_config\` with \`key: "wallet"\`.
+If the user asks "where is my wallet?" or similar, tell them the wallet is stored at \`~/.config/astra/spaces/<plugin>/<agent-name>/wallet.json\`. Remind them to never share the file — it contains their private key. To check their public key, use \`read_config\` with \`key: "wallet"\`.
 
 ### Reward claim flow (use tools, NOT scripts):
 IMPORTANT: Before step 1, determine the seasonId from context (portfolio response, rewards response, or anything seen in this conversation). Do NOT ask the user for the seasonId — use what you already know. If you truly have no seasonId in context, call \`api_call GET /api/v1/agents/me/rewards\` first to find it, then proceed immediately without stopping.

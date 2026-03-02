@@ -71,7 +71,7 @@ export async function getModel(): Promise<LanguageModelV1> {
   const config = loadConfig();
   if (!config) {
     throw new Error(
-      "No config found. Run the onboarding wizard first (delete ~/.config/astranova/config.json to re-run).",
+      "No config found. Run the onboarding wizard first (delete ~/.config/astra/config.json to re-run).",
     );
   }
 
@@ -133,7 +133,7 @@ async function ensureFreshToken(config: Config): Promise<string> {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Unknown error";
     throw new Error(
-      `OAuth token refresh failed: ${message}\nPlease re-run onboarding to log in again (delete ~/.config/astranova/config.json).`,
+      `OAuth token refresh failed: ${message}\nPlease re-run onboarding to log in again (delete ~/.config/astra/config.json).`,
     );
   }
 }
@@ -173,7 +173,7 @@ function createModelFromConfig(config: Config): LanguageModelV1 {
 
     case "ollama":
       throw new Error(
-        "Ollama support is coming soon. Please use Claude or ChatGPT/Codex.\nTo switch, delete ~/.config/astranova/config.json and re-run astra.",
+        "Ollama support is coming soon. Please use Claude or ChatGPT/Codex.\nTo switch, delete ~/.config/astra/config.json and re-run astra.",
       );
 
     default:

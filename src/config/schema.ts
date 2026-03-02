@@ -2,7 +2,7 @@ import { z } from "zod";
 
 /**
  * CLI config — LLM provider settings and preferences.
- * Stored at ~/.config/astranova/config.json
+ * Stored at ~/.config/astra/config.json
  * This is astra-cli specific (not part of the AstraNova API convention).
  */
 export const ConfigSchema = z.object({
@@ -42,7 +42,7 @@ export type Config = z.infer<typeof ConfigSchema>;
 
 /**
  * Agent credentials — returned by the registration API.
- * Stored at ~/.config/astranova/agents/<name>/credentials.json
+ * Stored at ~/.config/astra/spaces/<plugin>/agents/<name>/credentials.json
  * Matches the AstraNova API convention from skill.md.
  */
 export const CredentialsSchema = z.object({
@@ -55,7 +55,7 @@ export type Credentials = z.infer<typeof CredentialsSchema>;
 
 /**
  * Wallet data — keypair stored locally.
- * Stored at ~/.config/astranova/agents/<name>/wallet.json
+ * Stored at ~/.config/astra/spaces/<plugin>/agents/<name>/wallet.json
  * secretKey is a 64-byte numeric array (matches Solana CLI / tweetnacl format).
  */
 export const WalletSchema = z.object({

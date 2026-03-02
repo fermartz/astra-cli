@@ -2,7 +2,7 @@
  * Test setup — creates an isolated config directory for each test.
  *
  * Sets ASTRA_TEST_DIR so all path functions resolve to a temp directory,
- * ensuring tests never touch the real ~/.config/astranova.
+ * ensuring tests never touch the real ~/.config/astra.
  */
 import fs from "node:fs";
 import path from "node:path";

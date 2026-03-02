@@ -2,7 +2,7 @@
  * Integration Test 02: Agent Profile & Status
  *
  * Tests agent profile retrieval using the active agent's credentials.
- * Requires: An existing agent with credentials in ~/.config/astranova/
+ * Requires: An existing agent with credentials in ~/.config/astra/
  *
  * What it tests:
  * - GET /api/v1/agents/me — fetch own profile

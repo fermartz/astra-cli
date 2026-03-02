@@ -17,11 +17,11 @@
          /-._/-._/
          \   `\  \
           `-._/._/
-      _    ____ _____ ____      _    _   _  _____     ___
-     / \  / ___|_   _|  _ \    / \  | \ | |/ _ \ \   / / \
-    / _ \ \___ \ | | | |_) |  / _ \ |  \| | | | \ \ / / _ \
-   / ___ \ ___) || | |  _ <  / ___ \| |\  | |_| |\ V / ___ \
-  /_/   \_\____/ |_| |_| \_\/_/   \_\_| \_|\___/  \_/_/   \_\
+      _    ____ _____ ____      _          ____ __     _____
+     / \  / ___|_   _|  _ \    / \        / ___| |    |_____|
+    / _ \ \___ \ | | | |_) |  / _ \      | |   | |      | |
+   / ___ \ ___) || | |  _ <  / ___ \     | |___| |___   | |
+  /_/   \_\____/ |_| |_| \_\/_/   \_\     \____|_____||_____|
 ```
 
 Terminal agent for the [AstraNova](https://astranova.live) living market universe.
@@ -95,20 +95,20 @@ On first run, the onboarding wizard walks you through:
 - **Audit logging** — every tool call is logged with sanitized args (secrets redacted).
 - **No shell execution** — the agent has a fixed set of tools, no arbitrary command access.
 
-> **Local key storage:** Your Solana private key and API tokens are stored in `~/.config/astranova/` as plain text, protected by file permissions (`chmod 600`). This is the same approach used by Solana CLI (`~/.config/solana/id.json`), SSH (`~/.ssh/`), and most CLI wallets. It means anyone with access to your user account can read these files. **You are responsible for protecting your machine** — use disk encryption, a strong login password, and keep backups of your wallet in a secure location. Astra CLI never sends your private key to any server or LLM.
+> **Local key storage:** Your Solana private key and API tokens are stored in `~/.config/astra/` as plain text, protected by file permissions (`chmod 600`). This is the same approach used by Solana CLI (`~/.config/solana/id.json`), SSH (`~/.ssh/`), and most CLI wallets. It means anyone with access to your user account can read these files. **You are responsible for protecting your machine** — use disk encryption, a strong login password, and keep backups of your wallet in a secure location. Astra CLI never sends your private key to any server or LLM.
 
 ## Local Data
 
-All data is stored in `~/.config/astranova/` with restricted permissions:
+All data is stored in `~/.config/astra/` with restricted permissions:
 
 ```
-~/.config/astranova/
+~/.config/astra/
 ├── config.json              # LLM provider, model, auth (chmod 600)
-├── active_agent             # Current agent name
 ├── state.json               # Per-agent state (journey stage, autopilot config)
 ├── audit.log                # Tool call audit trail
 ├── .cache/                  # Remote context cache (24h TTL)
-└── agents/<agent-name>/
+├── plugins/                 # Installed third-party plugins
+└── spaces/<plugin>/<agent-name>/
     ├── credentials.json     # API key (chmod 600)
     ├── wallet.json          # Solana keypair (chmod 600)
     ├── memory.md            # Persistent agent memory
