@@ -31,7 +31,7 @@ import { loadLatestSession, pruneOldSessions, newSessionId } from "../config/ses
 import { loadMemory } from "../tools/memory.js";
 import { loadStrategy } from "../tools/strategy.js";
 import { runDaemon } from "../daemon/autopilot-worker.js";
-import { addPlugin } from "../domain/loader.js";
+import { addPlugin, listInstalledPlugins } from "../domain/loader.js";
 import App from "../ui/App.js";
 
 /**
@@ -86,6 +86,21 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     await addPlugin(addUrl);
+    process.exit(0);
+  }
+
+  // --plugins: list installed third-party plugins and exit
+  if (args.includes("--plugins")) {
+    const plugins = listInstalledPlugins();
+    if (plugins.length === 0) {
+      console.log("  No plugins installed. AstraNova is the built-in default.");
+      console.log("  Install a plugin: astra --add <url>");
+    } else {
+      console.log("  Installed plugins:");
+      for (const p of plugins) {
+        console.log(`    ${p.name} v${p.version}  —  ${p.description}`);
+      }
+    }
     process.exit(0);
   }
 

@@ -14,6 +14,7 @@ import {
   requestRestart,
 } from "../config/store.js";
 import { stopDaemon } from "../daemon/daemon-manager.js";
+import { getActiveManifest } from "../domain/plugin.js";
 
 /**
  * register_agent tool — registers a new agent with the AstraNova API.
@@ -68,7 +69,7 @@ export const registerAgentTool = tool({
     saveCredentials(name, {
       agent_name: name,
       api_key: data.api_key,
-      api_base: "https://agents.astranova.live",
+      api_base: getActiveManifest().apiBase,
     });
 
     // Update state.json with new agent

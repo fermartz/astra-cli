@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import * as clack from "@clack/prompts";
 import { PluginManifestSchema, type PluginManifest } from "./plugin.js";
 import { validatePluginUrl, validateAllowedPaths, scanForInjection } from "./validator.js";
-import { pluginDir, pluginManifestPath, pluginSkillPath, ensureDir } from "../config/paths.js";
+import { pluginDir, pluginManifestPath, pluginSkillPath, ensureDir, getRoot } from "../config/paths.js";
 import { setActivePlugin } from "../config/store.js";
 
 const MAX_SKILL_MD_BYTES = 1_024 * 1_024; // 1 MB
@@ -361,4 +361,24 @@ export async function addPlugin(manifestUrl: string): Promise<void> {
   clack.outro(
     `Plugin "${manifest.name}" installed successfully.\nRun \`astra\` to load it, or \`astra --plugin ${manifest.name}\` for this session only.`,
   );
+}
+
+/**
+ * List all installed third-party plugins (from plugins/ directory).
+ * AstraNova is always available as the built-in default and is not included here.
+ */
+export function listInstalledPlugins(): PluginManifest[] {
+  const pluginsRoot = path.join(getRoot(), "plugins");
+  if (!fs.existsSync(pluginsRoot)) return [];
+  return fs
+    .readdirSync(pluginsRoot, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .flatMap((e) => {
+      try {
+        const raw = fs.readFileSync(pluginManifestPath(e.name), "utf-8");
+        return [PluginManifestSchema.parse(JSON.parse(raw))];
+      } catch {
+        return [];
+      }
+    });
 }
