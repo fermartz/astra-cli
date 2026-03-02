@@ -34,6 +34,7 @@ import { loadMemory } from "../tools/memory.js";
 import { loadStrategy } from "../tools/strategy.js";
 import { runDaemon } from "../daemon/autopilot-worker.js";
 import { addPlugin, listInstalledPlugins, runPluginsPicker } from "../domain/loader.js";
+import { PLUGIN_REGISTRY } from "../domain/registry.js";
 import App from "../ui/App.js";
 
 /**
@@ -93,7 +94,6 @@ async function main(): Promise<void> {
 
   // --plugins: show registry with install status and exit
   if (args.includes("--plugins")) {
-    const { PLUGIN_REGISTRY } = await import("../domain/registry.js");
     const activePluginName = getActivePlugin();
     const installed = listInstalledPlugins();
     const installedNames = new Set(["astranova", ...installed.map((p) => p.name)]);
