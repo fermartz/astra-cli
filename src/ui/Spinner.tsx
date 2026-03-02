@@ -19,7 +19,7 @@ export default function Spinner({ label }: SpinnerProps): React.JSX.Element {
   }, []);
 
   return (
-    <Text dimColor>
+    <Text color="#ff00ff">
       {FRAMES[frame]} {label ?? "Thinking..."}
     </Text>
   );
