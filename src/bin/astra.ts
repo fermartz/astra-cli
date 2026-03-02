@@ -200,21 +200,27 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Step 3: Welcome back for returning users — also fetches agent status from API
+  // Whether this plugin uses AstraNova-specific features (journey stages, trading, wallet, etc.)
+  const isAstraNova = !!manifest.extensions?.journeyStages;
+
+  // Step 3: Welcome back — AstraNova only (fetches agent status from API)
   let apiStatus: AgentStatus | null = null;
-  if (isReturning) {
+  if (isReturning && isAstraNova) {
     apiStatus = await showWelcomeBack(agentName);
   }
 
   // Step 4: Fetch remote context (cached, graceful fallback)
-  const [skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext] = await Promise.all([
-    getSkillContext(),
-    fetchRemoteContext("TRADING.md").then((c) => c ?? ""),
-    fetchRemoteContext("WALLET.md").then((c) => c ?? ""),
-    fetchRemoteContext("REWARDS.md").then((c) => c ?? ""),
-    fetchRemoteContext("ONBOARDING.md").then((c) => c ?? ""),
-    fetchRemoteContext("API.md").then((c) => c ?? ""),
-  ]);
+  // Non-AstraNova plugins: only fetch skill.md — no trading/wallet/rewards guides
+  const skillContext = await getSkillContext();
+  const [tradingContext, walletContext, rewardsContext, onboardingContext, apiContext] = isAstraNova
+    ? await Promise.all([
+        fetchRemoteContext("TRADING.md").then((c) => c ?? ""),
+        fetchRemoteContext("WALLET.md").then((c) => c ?? ""),
+        fetchRemoteContext("REWARDS.md").then((c) => c ?? ""),
+        fetchRemoteContext("ONBOARDING.md").then((c) => c ?? ""),
+        fetchRemoteContext("API.md").then((c) => c ?? ""),
+      ])
+    : ["", "", "", "", ""];
 
   // Step 5: Ensure state.json exists with the current plugin/agent
   if (!loadState()) {
@@ -225,44 +231,50 @@ async function main(): Promise<void> {
       agents: {
         [plugin]: {
           [agentName]: {
-            status: apiStatus?.status ?? "unknown",
+            status: "active",
             journeyStage: "fresh",
             createdAt: new Date().toISOString(),
-            verificationCode: onboardingResult?.verificationCode ?? apiStatus?.verificationCode,
           },
         },
       },
     });
   }
 
-  // Step 6: Detect journey stage and build profile
-  const isNewAgent = !isReturning && onboardingResult !== null;
-  const hasWallet = loadWallet(agentName) !== null;
-  const boardPosted = hasBoardPost(agentName);
+  // Step 6: Build agent profile
+  // AstraNova: full journey detection with API status, wallet, board post.
+  // Generic plugins: minimal profile — no journey, no AstraNova-specific state.
+  let profile: AgentProfile;
 
-  const stage = detectJourneyStage({ isNewAgent, apiStatus, hasWallet });
+  if (isAstraNova) {
+    const isNewAgent = !isReturning && onboardingResult !== null;
+    const hasWallet = loadWallet(agentName) !== null;
+    const boardPosted = hasBoardPost(agentName);
+    const stage = detectJourneyStage({ isNewAgent, apiStatus, hasWallet });
+    const hasStrategy = !!loadStrategy(agentName);
 
-  // Persist stage to state.json so we remember between sessions
-  updateAgentState(agentName, {
-    status: apiStatus?.status ?? (isNewAgent ? "pending_verification" : "active"),
-    journeyStage: stage,
-    verificationCode: onboardingResult?.verificationCode ?? apiStatus?.verificationCode,
-  });
+    updateAgentState(agentName, {
+      status: apiStatus?.status ?? (isNewAgent ? "pending_verification" : "active"),
+      journeyStage: stage,
+      verificationCode: onboardingResult?.verificationCode ?? apiStatus?.verificationCode,
+    });
 
-  const hasStrategy = !!loadStrategy(agentName);
-
-  const profile: AgentProfile = {
-    agentName,
-    status: apiStatus?.status ?? (isNewAgent ? "pending_verification" : "active"),
-    simBalance: apiStatus?.simBalance,
-    walletAddress: apiStatus?.walletAddress,
-    walletLocal: hasWallet,
-    verificationCode: onboardingResult?.verificationCode ?? apiStatus?.verificationCode,
-    isNewAgent,
-    boardPosted,
-    journeyStage: stage,
-    hasStrategy,
-  };
+    profile = {
+      agentName,
+      status: apiStatus?.status ?? (isNewAgent ? "pending_verification" : "active"),
+      simBalance: apiStatus?.simBalance,
+      walletAddress: apiStatus?.walletAddress,
+      walletLocal: hasWallet,
+      verificationCode: onboardingResult?.verificationCode ?? apiStatus?.verificationCode,
+      isNewAgent,
+      boardPosted,
+      journeyStage: stage,
+      hasStrategy,
+    };
+  } else {
+    // Generic plugin — active, no journey overhead
+    updateAgentState(agentName, { status: "active" });
+    profile = { agentName, status: "active" };
+  }
 
   // Step 7: Session resume + memory
   pruneOldSessions(agentName);
