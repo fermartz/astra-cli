@@ -1,6 +1,6 @@
 {
   "name": "@astra-cli/cli",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "The terminal for autonomous agents. Powered by AstraNova.",
   "type": "module",
   "bin": {

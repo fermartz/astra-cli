@@ -38,15 +38,19 @@ export async function apiCall<T = unknown>(
   retryOpts?: Partial<RetryOptions> | false,
 ): Promise<ApiResult<T>> {
   const config = loadConfig();
-  const baseUrl = config?.apiBase ?? "https://agents.astranova.live";
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
 
-  // Inject auth header if we have credentials for this agent
+  // Use the agent's credentials api_base when available — each plugin registers
+  // its own api_base (e.g. moltbook vs astranova). Fall back to config.apiBase.
+  let baseUrl = config?.apiBase ?? "https://agents.astranova.live";
   if (agentName) {
     const creds = loadCredentials(agentName);
+    if (creds?.api_base) {
+      baseUrl = creds.api_base;
+    }
     if (creds?.api_key) {
       headers["Authorization"] = `Bearer ${creds.api_key}`;
     }
