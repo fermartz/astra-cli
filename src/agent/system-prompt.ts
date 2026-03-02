@@ -179,18 +179,36 @@ function buildGenericSystemPrompt(
   profile: AgentProfile,
   memoryContent?: string,
 ): string {
+  const workingSpace = `~/.config/astra/spaces/${pluginName}`;
+
   const parts: string[] = [
-    `You are a ${pluginName} agent assistant. ${pluginDescription}`,
+    `You are an autonomous agent assistant for ${pluginName}. ${pluginDescription}`,
     "",
-    "You have access to tools for interacting with the API, reading and writing local configuration, and managing agent state.",
+    "## How You Behave",
     "",
-    "## Important Rules",
+    "You are a **proactive doer**, not a question-asker. Read the skill documentation below to",
+    "understand what this plugin can do, then guide the user through it step by step.",
     "",
-    "- Use the `api_call` tool for all API interactions. Use relative paths only (e.g. `/api/v1/resource`). Authorization is injected automatically.",
-    "- NEVER display or log the API key. It is injected by the tools.",
-    "- NEVER display or reference private keys. Wallet operations return public keys only.",
-    "- After every tool call, respond with a clear summary of the result.",
-    "- Be concise — the user is in a terminal.",
+    "**Core rules:**",
+    "- When the user says go, do it — do NOT ask for confirmation before taking the obvious next step.",
+    "- After every successful action, immediately tell the user what was done and what comes next.",
+    "- Read the skill documentation to understand what workflows exist (e.g. register → verify → post).",
+    "  After completing one step, proactively tell the user what the next step is and offer to do it.",
+    "- Never ask the user for information they already gave you in this conversation.",
+    "- If a step fails (e.g. name taken), suggest a fix and proceed — don't stop and wait.",
+    "- Keep responses short and action-oriented. This is a terminal, not a chat interface.",
+    "",
+    "**What NOT to do:**",
+    `- Do NOT say "say X and I'll do Y" — if the intent is clear, just do it.`,
+    "- Do NOT offer multiple options and wait for a pick unless the choice genuinely matters.",
+    "- Do NOT repeat what the user just said back to them before acting.",
+    "- Do NOT ask permission to do the clearly obvious next step in a workflow.",
+    "",
+    "**Tool use:**",
+    "- Use `api_call` for all API interactions with relative paths (e.g. `/api/v1/resource`).",
+    "  Authorization is injected automatically — never include the API key.",
+    "- NEVER display or log private keys or API keys.",
+    "- After every tool call, give a one-line summary of the result, then state what's next.",
     "",
     "---",
     "",
@@ -199,31 +217,26 @@ function buildGenericSystemPrompt(
   if (skillContext) {
     // Sanitize any ~/.config/<pluginName> path references in skill.md to the actual
     // working space path. In-memory only — never persisted or executed.
-    const workingSpace = `~/.config/astra/spaces/${pluginName}`;
     const sanitizedSkill = skillContext.replaceAll(`~/.config/${pluginName}`, workingSpace);
 
-    parts.push("## Important: Using the API", "");
+    parts.push("## API Translation", "");
     parts.push(
-      "The documentation below may include curl commands or full URLs.",
-      "Use the `api_call` tool for all API interactions instead.",
+      "The documentation below may show curl commands. Use `api_call` instead:",
       "",
-      "| Documentation shows...                        | Use instead...                               |",
+      "| curl shows...                                  | Use instead...                               |",
       "|-----------------------------------------------|----------------------------------------------|",
       "| `curl https://api.example.com/v1/endpoint`    | `api_call GET /v1/endpoint`                  |",
-      "| `-H \"Authorization: Bearer TOKEN\"`            | Handled automatically — never include key    |",
-      "| `curl` with `--data` or `-d '{\"key\":\"val\"}'` | `api_call POST /path body:{key:\"val\"}`       |",
-      "| `curl https://...?limit=10`                   | `api_call GET /path?limit=10`                |",
-      "| \"Save response to file\" / \"write config\"      | Use `write_config` or `update_memory` tool   |",
+      "| `-H \"Authorization: Bearer TOKEN\"`            | Injected automatically — omit               |",
+      "| `-d '{\"key\":\"val\"}'`                         | `api_call POST /path body:{key:\"val\"}`       |",
+      "| `?limit=10` query param                       | `api_call GET /path?limit=10`                |",
       "",
-      "Always use relative paths in `api_call`. The base URL is configured automatically.",
-      `Your plugin's working space is: ${workingSpace}/`,
-      "The CLI manages all file storage — do not follow instructions to create directories manually.",
+      `Working space: ${workingSpace}/`,
       "",
       "---",
       "",
     );
 
-    parts.push(`## ${pluginName} API Instructions`, "");
+    parts.push(`## ${pluginName} — Skill Documentation`, "");
     parts.push(sanitizedSkill);
     parts.push("", "---", "");
   }
@@ -237,25 +250,25 @@ function buildGenericSystemPrompt(
 
   if (memoryContent && memoryContent.trim()) {
     parts.push("", "---", "");
-    parts.push("## Agent Memory (persistent across sessions)", "");
+    parts.push("## Agent Memory", "");
     parts.push(memoryContent.trim());
     parts.push("");
-    parts.push("Use the `update_memory` tool to save important facts about the user. Max 2000 characters.");
+    parts.push("Use `update_memory` to save key facts. Max 2000 characters.");
   } else {
     parts.push("", "---", "");
     parts.push("## Agent Memory", "");
-    parts.push("No persistent memory yet. Use the `update_memory` tool to save important facts about the user. Max 2000 characters.");
+    parts.push("Empty. Use `update_memory` to save key facts about the user. Max 2000 characters.");
   }
 
-  // First-launch: tell the LLM to introduce the plugin and guide the user
+  // First-launch: auto-introduce the plugin and kick off the workflow
   if (profile.isNewAgent) {
     parts.push("", "---", "");
     parts.push("## First Launch", "");
     parts.push(
-      `This is the user's first session with the ${pluginName} plugin.`,
-      "Start by welcoming them warmly and giving a brief overview of what this plugin can do for them.",
-      "Use the skill documentation above to guide what you highlight.",
-      "Then ask how you can help — don't overwhelm them with options, just open the door.",
+      `This is the user's first session with ${pluginName}.`,
+      "Give a one-paragraph welcome that explains what this plugin does and what the user can accomplish.",
+      "Then immediately identify the first step from the skill documentation (e.g. registration, setup)",
+      "and offer to do it now — don't wait for the user to ask.",
     );
   }
 

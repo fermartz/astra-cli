@@ -8,6 +8,8 @@ import { formatInterval } from "../autopilot/scheduler.js";
 interface StatusBarProps {
   agentName: string;
   pluginName: string;
+  /** Whether this is AstraNova — enables market/portfolio polling and $NOVA/$SIM display. */
+  isAstraNova: boolean;
   journeyStage: JourneyStage;
   autopilotMode?: AutopilotMode;
   autopilotIntervalMs?: number;
@@ -38,6 +40,7 @@ const POLL_INTERVAL_MS = 60_000; // 60 seconds
 const StatusBar = React.memo(function StatusBar({
   agentName,
   pluginName,
+  isAstraNova,
   journeyStage,
   autopilotMode = "off",
   autopilotIntervalMs = 300_000,
@@ -46,7 +49,8 @@ const StatusBar = React.memo(function StatusBar({
   // Single state object to batch market + portfolio updates into one render
   const [data, setData] = useState<BarData>({ market: null, portfolio: null });
   const mounted = useRef(true);
-  const canFetchData = journeyStage !== "fresh" && journeyStage !== "pending";
+  // Market/portfolio data only makes sense for AstraNova (journey stages, $SIM/$NOVA)
+  const canFetchData = isAstraNova && journeyStage !== "fresh" && journeyStage !== "pending";
 
   const poll = useCallback(async () => {
     const [marketRes, portfolioRes] = await Promise.all([
@@ -124,7 +128,7 @@ const StatusBar = React.memo(function StatusBar({
           </>
         )}
 
-        {!canFetchData && (
+        {isAstraNova && !canFetchData && (
           <>
             <Text dimColor> │ </Text>
             <Text dimColor>pending verification</Text>

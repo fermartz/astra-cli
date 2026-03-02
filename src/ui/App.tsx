@@ -657,6 +657,7 @@ export default function App({
         <StatusBar
           agentName={agentName}
           pluginName={manifest.name}
+          isAstraNova={hasJourneyStages}
           journeyStage={profile.journeyStage ?? "full"}
           autopilotMode={autopilotMode}
           autopilotIntervalMs={autopilotIntervalMs}
