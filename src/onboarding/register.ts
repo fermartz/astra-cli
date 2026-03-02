@@ -203,7 +203,6 @@ const NAME_SUGGESTIONS_ASTRANOVA = [
 ];
 
 const NAME_SUGGESTIONS_GENERIC = [
-  "astro-fm",
   "loop-nine",
   "bright-node",
   "static-mind",
@@ -215,6 +214,7 @@ const NAME_SUGGESTIONS_GENERIC = [
   "drift-logic",
   "pattern-zero",
   "idle-core",
+  "node-ghost",
 ];
 
 function pickRandomNames(count: number): string[] {
