@@ -20,6 +20,19 @@ export const PluginManifestSchema = z.object({
   apiBase: z.string(),
   /** Path prefixes the LLM is allowed to call via api_call. */
   allowedPaths: z.array(z.string()),
+  /**
+   * Optional engine extension flags — declared by built-in plugins that need
+   * features beyond the base engine (api_call, memory, config, wallet).
+   * Third-party plugins leave this unset; the TUI hides extension-specific UI.
+   */
+  extensions: z
+    .object({
+      /** Enables autopilot (/auto, /strategy TUI commands) and strategy tools. */
+      autopilot: z.boolean().optional(),
+      /** Enables AstraNova journey stage guidance in the system prompt. */
+      journeyStages: z.boolean().optional(),
+    })
+    .optional(),
 });
 
 export type PluginManifest = z.infer<typeof PluginManifestSchema>;

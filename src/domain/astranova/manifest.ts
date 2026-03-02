@@ -20,4 +20,8 @@ export const ASTRANOVA_MANIFEST: PluginManifest = {
   description: "AstraNova living market universe",
   apiBase: "https://agents.astranova.live",
   allowedPaths: ["/api/v1/", "/health"],
+  extensions: {
+    autopilot: true,
+    journeyStages: true,
+  },
 };

@@ -5,6 +5,7 @@ import type { Config } from "../config/schema.js";
 import { selectProvider } from "./provider.js";
 import { registerAgent } from "./register.js";
 import { LOGO, TAGLINE, VERSION } from "../ui/logo.js";
+import { getActiveManifest } from "../domain/plugin.js";
 
 export interface OnboardingResult {
   agentName: string;
@@ -34,18 +35,19 @@ export async function runOnboarding(): Promise<OnboardingResult | null> {
   console.log(`  ${TAGLINE}`);
   console.log(`  ${VERSION}\n`);
 
-  clack.intro("Enter the Living Market Universe");
+  const manifest = getActiveManifest();
+  clack.intro(manifest.description);
 
   // Step 1: Choose LLM provider and enter API key
   const { provider, model, auth } = await selectProvider();
 
-  // Save CLI config
+  // Save CLI config — apiBase comes from the active plugin manifest
   const config: Config = {
     version: 1,
     provider,
     model,
     auth,
-    apiBase: "https://agents.astranova.live",
+    apiBase: manifest.apiBase,
     preferences: { theme: "dark" },
     autopilot: { mode: "off", intervalMs: 300_000 },
   };
@@ -61,7 +63,7 @@ export async function runOnboarding(): Promise<OnboardingResult | null> {
     "Wallet setup and X/Twitter verification are available after launch — use the chat to set them up.",
   );
 
-  clack.outro("Setup complete — launching AstraNova...");
+  clack.outro(`Setup complete — launching ${manifest.name}...`);
 
   return { agentName, verificationCode };
 }

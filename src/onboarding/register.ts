@@ -2,6 +2,7 @@ import * as clack from "@clack/prompts";
 import { AgentNameSchema, RegisterResponseSchema } from "../config/schema.js";
 import { saveCredentials, setActiveAgent } from "../config/store.js";
 import { apiCall } from "../utils/http.js";
+import { getActiveManifest } from "../domain/plugin.js";
 
 interface RegisterResult {
   agentName: string;
@@ -59,7 +60,7 @@ export async function registerAgent(): Promise<RegisterResult> {
   saveCredentials(agentName, {
     agent_name: agentName,
     api_key,
-    api_base: "https://agents.astranova.live",
+    api_base: getActiveManifest().apiBase,
   });
 
   setActiveAgent(agentName);

@@ -1,3 +1,5 @@
+import { getActiveManifest } from "../domain/plugin.js";
+
 export type JourneyStage = "fresh" | "pending" | "verified" | "trading" | "wallet_ready" | "full";
 
 export interface AgentProfile {
@@ -37,6 +39,13 @@ export function buildSystemPrompt(
   profile: AgentProfile,
   memoryContent?: string,
 ): string {
+  // Non-AstraNova plugins get a minimal generic prompt — none of the
+  // AstraNova journey guidance, trading context, or rich tool overrides apply.
+  const manifest = getActiveManifest();
+  if (!manifest.extensions?.journeyStages) {
+    return buildGenericSystemPrompt(skillContext, manifest.name, manifest.description, profile, memoryContent);
+  }
+
   const stage = profile.journeyStage ?? "full";
   const isPending = stage === "fresh" || stage === "pending";
 
@@ -152,6 +161,65 @@ Specific triggers to save memory:
   // Journey-stage-specific guidance
   parts.push("", "---", "");
   parts.push(buildJourneyGuidance(stage, profile));
+
+  return parts.join("\n");
+}
+
+// ─── Generic Plugin Prompt ─────────────────────────────────────────────
+
+/**
+ * Minimal system prompt for non-AstraNova plugins.
+ * Uses the plugin's narrative skillContext and a generic role description.
+ * No AstraNova journey guidance, trading context, or rich tool overrides.
+ */
+function buildGenericSystemPrompt(
+  skillContext: string,
+  pluginName: string,
+  pluginDescription: string,
+  profile: AgentProfile,
+  memoryContent?: string,
+): string {
+  const parts: string[] = [
+    `You are a ${pluginName} agent assistant. ${pluginDescription}`,
+    "",
+    "You have access to tools for interacting with the API, reading and writing local configuration, and managing agent state.",
+    "",
+    "## Important Rules",
+    "",
+    "- Use the `api_call` tool for all API interactions. Use relative paths only (e.g. `/api/v1/resource`). Authorization is injected automatically.",
+    "- NEVER display or log the API key. It is injected by the tools.",
+    "- NEVER display or reference private keys. Wallet operations return public keys only.",
+    "- After every tool call, respond with a clear summary of the result.",
+    "- Be concise — the user is in a terminal.",
+    "",
+    "---",
+    "",
+  ];
+
+  if (skillContext) {
+    parts.push(`## ${pluginName} API Instructions`, "");
+    parts.push(skillContext);
+    parts.push("", "---", "");
+  }
+
+  parts.push("## Current Agent State", "");
+  parts.push(`Agent: ${profile.agentName}`);
+  parts.push(`Status: ${profile.status ?? "unknown"}`);
+  if (profile.walletAddress) {
+    parts.push(`Wallet: ${profile.walletAddress}`);
+  }
+
+  if (memoryContent && memoryContent.trim()) {
+    parts.push("", "---", "");
+    parts.push("## Agent Memory (persistent across sessions)", "");
+    parts.push(memoryContent.trim());
+    parts.push("");
+    parts.push("Use the `update_memory` tool to save important facts about the user. Max 2000 characters.");
+  } else {
+    parts.push("", "---", "");
+    parts.push("## Agent Memory", "");
+    parts.push("No persistent memory yet. Use the `update_memory` tool to save important facts about the user. Max 2000 characters.");
+  }
 
   return parts.join("\n");
 }

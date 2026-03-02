@@ -3,7 +3,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ZodType } from "zod";
 import { getModel, isCodexOAuth, isOpenAIResponses, getCodexAccessToken, getOpenAIApiKey } from "./provider.js";
 import { buildSystemPrompt, type AgentProfile } from "./system-prompt.js";
-import { astraTools } from "../tools/index.js";
+import { buildAstraTools } from "../tools/index.js";
 import { callCodex, callCodexWithRetry, convertToolsForCodex, type CodexInputItem } from "./codex-provider.js";
 import { loadConfig } from "../config/store.js";
 import { writeAuditEntry } from "../utils/audit.js";
@@ -204,13 +204,16 @@ async function runResponsesApiTurn(
   // No outer timeout — each callCodexWithRetry manages its own per-call timeout + retry.
   const { model, baseUrl, getAccessToken, onTokenExpired } = turnConfig;
 
+  // Build the active tool set for this turn (filtered by plugin manifest)
+  const tools = buildAstraTools();
+
   // Convert CoreMessage[] to Codex input items — preserve tool call context
   const codexInput: CodexInputItem[] = convertToCodexInput(messages);
 
   // Convert tools to Responses API format — extract JSON schema from Zod-based tools
   const codexTools = convertToolsForCodex(
     Object.fromEntries(
-      Object.entries(astraTools).map(([name, t]) => [
+      Object.entries(tools).map(([name, t]) => [
         name,
         {
           description: (t as { description?: string }).description,
@@ -267,7 +270,7 @@ async function runResponsesApiTurn(
 
     // Execute each tool call
     for (const tc of result.toolCalls) {
-      const toolDef = astraTools[tc.name as keyof typeof astraTools];
+      const toolDef = tools[tc.name as keyof typeof tools];
 
       // Add tool-call part to assistant message
       let parsedArgs: Record<string, unknown> = {};
@@ -456,6 +459,7 @@ async function runSdkTurn(
 ): Promise<AgentLoopResult> {
   debugLog(`SDK turn starting — getting model...`);
   const model = await getModel();
+  const tools = buildAstraTools();
   debugLog(`Model ready: ${model.modelId ?? "unknown"} — calling streamText...`);
 
   const abortController = new AbortController();
@@ -482,7 +486,7 @@ async function runSdkTurn(
       model,
       system: systemPrompt,
       messages,
-      tools: astraTools,
+      tools,
       maxSteps: 10,
       temperature: 0.7,
       abortSignal: abortController.signal,

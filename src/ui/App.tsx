@@ -20,6 +20,7 @@ import {
 } from "../autopilot/scheduler.js";
 import { loadStrategy } from "../tools/strategy.js";
 import { startDaemon, stopDaemon } from "../daemon/daemon-manager.js";
+import { getActiveManifest } from "../domain/plugin.js";
 
 
 interface AppProps {
@@ -59,6 +60,11 @@ export default function App({
   debug,
 }: AppProps): React.JSX.Element {
   const { exit } = useApp();
+
+  // Plugin manifest — stable for the lifetime of this session
+  const manifest = getActiveManifest();
+  const hasAutopilot = manifest.extensions?.autopilot === true;
+  const hasJourneyStages = manifest.extensions?.journeyStages === true;
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(
@@ -211,9 +217,9 @@ export default function App({
     [skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry],
   );
 
-  // ── Autopilot timer ────────────────────────────────────────────────
+  // ── Autopilot timer (autopilot extension only) ─────────────────────
   useEffect(() => {
-    if (autopilotMode === "off") return;
+    if (!hasAutopilot || autopilotMode === "off") return;
 
     const interval = setInterval(() => {
       // Skip if a turn is already running
@@ -247,6 +253,7 @@ export default function App({
   // ── sendMessage ────────────────────────────────────────────────────
   const sendMessage = useCallback(
     async (userText: string, displayRole: "user" | "autopilot" = "user") => {
+      let skipChatDisplay = false;
       // ── Slash commands (handled locally, never sent to LLM) ────
       if (userText.startsWith("/")) {
         const parts = userText.trim().split(/\s+/);
@@ -271,8 +278,8 @@ export default function App({
           return;
         }
 
-        // ── /auto slash commands ────
-        if (cmd === "/auto") {
+        // ── /auto slash commands (AstraNova autopilot extension only) ────
+        if (hasAutopilot && cmd === "/auto") {
           const sub = parts[1]?.toLowerCase();
 
           if (!sub || sub === "status") {
@@ -382,15 +389,16 @@ export default function App({
           return;
         }
 
-        // ── /strategy slash commands ────
-        if (cmd === "/strategy") {
+        // ── /strategy slash commands (AstraNova autopilot extension only) ────
+        if (hasAutopilot && cmd === "/strategy") {
           const sub = parts[1]?.toLowerCase();
+          const originalCmd = userText;
 
           if (sub === "status") {
             const strategy = loadStrategy(agentName);
             setChatMessages((prev) => [
               ...prev,
-              { role: "user", content: userText },
+              { role: "user", content: originalCmd },
               strategy
                 ? { role: "assistant", content: `**Your current strategy:**\n\n${strategy}` }
                 : { role: "assistant", content: "No strategy set up yet. Use `/strategy setup` to create one." },
@@ -399,85 +407,109 @@ export default function App({
           }
 
           if (sub === "setup") {
-            // Show existing strategy (if any) and let LLM guide edit/create
             const existing = loadStrategy(agentName);
             userText = existing
               ? `I want to review and update my trading strategy. Here it is:\n\n${existing}\n\nLet's go through it and improve or replace it.`
               : "I want to create a trading strategy. Please guide me through the options.";
-            // Fall through to LLM
+            // Add the command as user message, then fall through to LLM with rewritten userText
+            setChatMessages((prev) => [...prev, { role: "user", content: originalCmd }]);
+            skipChatDisplay = true;
           } else if (!sub) {
             // No subcommand: one-shot run if strategy exists, else guide creation
             const strategy = loadStrategy(agentName);
             if (strategy) {
               const trigger = buildStrategyRunTrigger(strategy);
-              setChatMessages((prev) => [...prev, { role: "user", content: "/strategy" }]);
+              setChatMessages((prev) => [...prev, { role: "user", content: originalCmd }]);
               void runAutopilotTurn(trigger, "chat");
               return;
             }
             // No strategy — guide creation
             userText = "I want to create a trading strategy. Please guide me through the options.";
-            // Fall through to LLM
+            setChatMessages((prev) => [...prev, { role: "user", content: originalCmd }]);
+            skipChatDisplay = true;
+          } else {
+            // Unknown subcommand
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: originalCmd },
+              { role: "assistant", content: "Usage: `/strategy` · `/strategy setup` · `/strategy status`" },
+            ]);
+            return;
           }
-          // Fall through to LLM for setup/creation flows
+          // Fall through to LLM — user message already added above
         }
 
         if (cmd === "/help" || cmd === "/?") {
+          const helpLines: string[] = [];
+
+          if (hasJourneyStages) {
+            helpLines.push(
+              "**Quick Actions**",
+              "",
+              "  `/portfolio` — Show portfolio card",
+              "  `/market`    — Current price, mood & trend",
+              "  `/rewards`   — Check claimable $ASTRA",
+              "  `/trades`    — Recent trade history",
+              "  `/board`     — Browse the board",
+              "  `/wallet`    — Check wallet status",
+              "  `/buy <amt>` — Buy $NOVA (e.g. `/buy 500`)",
+              "  `/sell <amt>`— Sell $NOVA (e.g. `/sell 200`)",
+              "",
+            );
+          }
+
+          if (hasAutopilot) {
+            helpLines.push(
+              "**Strategy & Autopilot**",
+              "",
+              "  `/strategy`        — Run strategy once (or create if none)",
+              "  `/strategy setup`  — Create or edit your strategy",
+              "  `/strategy status` — View current strategy",
+              "  `/auto on`         — Enable semi-auto mode",
+              "  `/auto full`       — Enable full-auto mode (requires strategy)",
+              "  `/auto off`        — Disable autopilot",
+              "  `/auto 5m`         — Set interval (1m-60m)",
+              "  `/auto status`     — Show autopilot status",
+              "  `/auto report`     — Show autopilot trade log",
+              "",
+            );
+          }
+
+          helpLines.push(
+            "**System**",
+            "",
+            "  `/help`      — Show this help",
+            "  `/exit`      — Exit (also `/quit`, `/q`)",
+            "  `/clear`     — Clear chat display",
+            "  `Ctrl+C`     — Exit immediately",
+          );
+
           setChatMessages((prev) => [
             ...prev,
             { role: "user", content: userText },
-            {
-              role: "assistant",
-              content: [
-                "**Quick Actions**",
-                "",
-                "  `/portfolio` — Show portfolio card",
-                "  `/market`    — Current price, mood & trend",
-                "  `/rewards`   — Check claimable $ASTRA",
-                "  `/trades`    — Recent trade history",
-                "  `/board`     — Browse the board",
-                "  `/wallet`    — Check wallet status",
-                "  `/buy <amt>` — Buy $NOVA (e.g. `/buy 500`)",
-                "  `/sell <amt>`— Sell $NOVA (e.g. `/sell 200`)",
-                "",
-                "**Strategy & Autopilot**",
-                "",
-                "  `/strategy`        — Run strategy once (or create if none)",
-                "  `/strategy setup`  — Create or edit your strategy",
-                "  `/strategy status` — View current strategy",
-                "  `/auto on`         — Enable semi-auto mode",
-                "  `/auto full`       — Enable full-auto mode (requires strategy)",
-                "  `/auto off`        — Disable autopilot",
-                "  `/auto 5m`         — Set interval (1m-60m)",
-                "  `/auto status`     — Show autopilot status",
-                "  `/auto report`     — Show autopilot trade log",
-                "",
-                "**System**",
-                "",
-                "  `/help`      — Show this help",
-                "  `/exit`      — Exit (also `/quit`, `/q`)",
-                "  `/clear`     — Clear chat display",
-                "  `Ctrl+C`     — Exit immediately",
-              ].join("\n"),
-            },
+            { role: "assistant", content: helpLines.join("\n") },
           ]);
           return;
         }
 
         // ── Shortcut commands (sent to LLM as natural language) ────
-        const shortcuts: Record<string, string> = {
-          "/portfolio": "Show my portfolio using the card format.",
-          "/market": "Show the current market state — price, mood, and recent trend.",
-          "/rewards": "Check my rewards status and show if anything is claimable.",
-          "/trades": "Show my recent trade history.",
-          "/board": "Show recent posts from the board.",
-          "/wallet": "Check my wallet status — do I have one set up?",
-          "/buy": `Buy ${parts.slice(1).join(" ") || "some"} $NOVA.`,
-          "/sell": `Sell ${parts.slice(1).join(" ") || "some"} $NOVA.`,
-        };
+        // AstraNova-specific shortcuts are only available when journeyStages extension is active.
+        const shortcuts: Record<string, string> = hasJourneyStages
+          ? {
+              "/portfolio": "Show my portfolio using the card format.",
+              "/market": "Show the current market state — price, mood, and recent trend.",
+              "/rewards": "Check my rewards status and show if anything is claimable.",
+              "/trades": "Show my recent trade history.",
+              "/board": "Show recent posts from the board.",
+              "/wallet": "Check my wallet status — do I have one set up?",
+              "/buy": `Buy ${parts.slice(1).join(" ") || "some"} $NOVA.`,
+              "/sell": `Sell ${parts.slice(1).join(" ") || "some"} $NOVA.`,
+            }
+          : {};
 
         if (shortcuts[cmd]) {
           userText = shortcuts[cmd];
-        } else {
+        } else if (cmd !== "/strategy" || !hasAutopilot) {
           // Unknown slash command — show hint
           setChatMessages((prev) => [
             ...prev,
@@ -488,10 +520,12 @@ export default function App({
         }
       }
 
-      setChatMessages((prev) => [
-        ...prev,
-        { role: displayRole, content: userText },
-      ]);
+      if (!skipChatDisplay) {
+        setChatMessages((prev) => [
+          ...prev,
+          { role: displayRole, content: userText },
+        ]);
+      }
 
       const newCoreMessages: CoreMessage[] = [
         ...coreMessages,
@@ -618,8 +652,17 @@ export default function App({
       </Box>
 
       <Box flexShrink={0} width="100%" paddingX={2} marginTop={1} justifyContent="space-between">
-        <Text dimColor>/help · /portfolio · /market · /strategy · /exit</Text>
-        <Text dimColor>/auto on·off·set · Ctrl+C quit</Text>
+        {hasJourneyStages ? (
+          <>
+            <Text dimColor>/help · /portfolio · /market · /strategy · /exit</Text>
+            <Text dimColor>/auto on·off·set · Ctrl+C quit</Text>
+          </>
+        ) : (
+          <>
+            <Text dimColor>/help · /exit · Ctrl+C quit</Text>
+            <Text dimColor>{manifest.name}</Text>
+          </>
+        )}
       </Box>
     </Box>
   );
