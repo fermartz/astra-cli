@@ -228,6 +228,26 @@ export function clearRestartFlag(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Plugins-Picker Flag (~/.config/astra/.plugins-picker)
+// ---------------------------------------------------------------------------
+
+/** Check if a plugins-picker session was requested (e.g., by /plugins TUI command). */
+export function isPluginsPickerRequested(): boolean {
+  return fs.existsSync(path.join(getRoot(), ".plugins-picker"));
+}
+
+/** Request a plugins-picker session (called by /plugins in the TUI). */
+export function requestPluginsPicker(): void {
+  writeFileSecure(path.join(getRoot(), ".plugins-picker"), new Date().toISOString());
+}
+
+/** Clear the plugins-picker flag. */
+export function clearPluginsPickerFlag(): void {
+  const flagPath = path.join(getRoot(), ".plugins-picker");
+  if (fs.existsSync(flagPath)) fs.unlinkSync(flagPath);
+}
+
+// ---------------------------------------------------------------------------
 // Board Post Flag (~/.config/astra/spaces/<plugin>/agents/<name>/board_posted)
 // ---------------------------------------------------------------------------
 

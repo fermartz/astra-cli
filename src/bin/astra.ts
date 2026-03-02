@@ -16,6 +16,8 @@ import {
   updateAgentState,
   isRestartRequested,
   clearRestartFlag,
+  isPluginsPickerRequested,
+  clearPluginsPickerFlag,
   loadAutopilotConfig,
   loadAutopilotLogSince,
   getActivePlugin,
@@ -31,7 +33,7 @@ import { loadLatestSession, pruneOldSessions, newSessionId } from "../config/ses
 import { loadMemory } from "../tools/memory.js";
 import { loadStrategy } from "../tools/strategy.js";
 import { runDaemon } from "../daemon/autopilot-worker.js";
-import { addPlugin, listInstalledPlugins } from "../domain/loader.js";
+import { addPlugin, listInstalledPlugins, runPluginsPicker } from "../domain/loader.js";
 import App from "../ui/App.js";
 
 /**
@@ -89,18 +91,20 @@ async function main(): Promise<void> {
     process.exit(0);
   }
 
-  // --plugins: list installed third-party plugins and exit
+  // --plugins: show registry with install status and exit
   if (args.includes("--plugins")) {
-    const plugins = listInstalledPlugins();
-    if (plugins.length === 0) {
-      console.log("  No plugins installed. AstraNova is the built-in default.");
-      console.log("  Install a plugin: astra --add <url>");
-    } else {
-      console.log("  Installed plugins:");
-      for (const p of plugins) {
-        console.log(`    ${p.name} v${p.version}  —  ${p.description}`);
-      }
+    const { PLUGIN_REGISTRY } = await import("../domain/registry.js");
+    const activePluginName = getActivePlugin();
+    const installed = listInstalledPlugins();
+    const installedNames = new Set(["astranova", ...installed.map((p) => p.name)]);
+    console.log("\n  Plugins:\n");
+    for (const entry of PLUGIN_REGISTRY) {
+      const isActive = entry.name === activePluginName;
+      const isInstalled = installedNames.has(entry.name);
+      const status = isActive ? "(active)" : isInstalled ? "(installed)" : "(not installed)";
+      console.log(`    ${entry.name.padEnd(14)} ${status.padEnd(16)} ${entry.tagline}`);
     }
+    console.log("\n  Use /plugins inside the TUI to install or switch.\n");
     process.exit(0);
   }
 
@@ -127,6 +131,13 @@ async function main(): Promise<void> {
 
   // Set the active manifest before any tool or remote context call
   setActiveManifest(manifest);
+
+  // Plugins-picker intercept — requested by /plugins TUI command
+  if (isPluginsPickerRequested()) {
+    clearPluginsPickerFlag();
+    await runPluginsPicker();
+    process.exit(0);
+  }
 
   // Daemon mode — skip onboarding + TUI, run background worker
   if (isDaemonMode) {

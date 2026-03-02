@@ -6,7 +6,7 @@ import ChatView, { type ChatMessage } from "./ChatView.js";
 import Input from "./Input.js";
 import Spinner from "./Spinner.js";
 import { runAgentTurn } from "../agent/loop.js";
-import { isRestartRequested, loadConfig, saveAutopilotConfig, loadEpochBudget, saveEpochBudget, appendAutopilotLog, loadAutopilotLogSince } from "../config/store.js";
+import { isRestartRequested, loadConfig, saveAutopilotConfig, loadEpochBudget, saveEpochBudget, appendAutopilotLog, loadAutopilotLogSince, requestPluginsPicker } from "../config/store.js";
 import { saveSession } from "../config/sessions.js";
 import type { AgentProfile } from "../agent/system-prompt.js";
 import type { AutopilotConfig } from "../autopilot/scheduler.js";
@@ -278,6 +278,17 @@ export default function App({
           return;
         }
 
+        if (cmd === "/plugins") {
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "user", content: userText },
+            { role: "assistant", content: "Opening plugin browser..." },
+          ]);
+          requestPluginsPicker();
+          setTimeout(() => exit(), 800);
+          return;
+        }
+
         // ── /auto slash commands (AstraNova autopilot extension only) ────
         if (hasAutopilot && cmd === "/auto") {
           const sub = parts[1]?.toLowerCase();
@@ -478,6 +489,7 @@ export default function App({
           helpLines.push(
             "**System**",
             "",
+            "  `/plugins`   — Browse and switch plugins",
             "  `/help`      — Show this help",
             "  `/exit`      — Exit (also `/quit`, `/q`)",
             "  `/clear`     — Clear chat display",

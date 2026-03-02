@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { execFileSync } from "node:child_process";
 import * as clack from "@clack/prompts";
 import { PluginManifestSchema, type PluginManifest } from "./plugin.js";
 import { validatePluginUrl, validateAllowedPaths, scanForInjection } from "./validator.js";
 import { pluginDir, pluginManifestPath, pluginSkillPath, ensureDir, getRoot } from "../config/paths.js";
-import { setActivePlugin } from "../config/store.js";
+import { setActivePlugin, getActivePlugin, loadState } from "../config/store.js";
+import { PLUGIN_REGISTRY } from "./registry.js";
 
 const MAX_SKILL_MD_BYTES = 1_024 * 1_024; // 1 MB
 const FETCH_TIMEOUT_MS = 10_000; // 10 seconds
@@ -381,4 +383,83 @@ export function listInstalledPlugins(): PluginManifest[] {
         return [];
       }
     });
+}
+
+/**
+ * Interactive plugin picker using clack.
+ * Shows the curated PLUGIN_REGISTRY with install status.
+ * Handles: already active, installed (switch), not installed (full wizard).
+ *
+ * Called from astra.ts after the TUI exits with a .plugins-picker flag.
+ */
+export async function runPluginsPicker(): Promise<void> {
+  if (!loadState()) {
+    clack.log.error("No configuration found. Run `astra` to complete setup first.");
+    process.exit(1);
+  }
+
+  const activePlugin = getActivePlugin();
+  const installed = listInstalledPlugins();
+  const installedNames = new Set(["astranova", ...installed.map((p) => p.name)]);
+
+  clack.intro(" astra plugins ");
+
+  const choices = PLUGIN_REGISTRY.map((entry) => {
+    const isActive = entry.name === activePlugin;
+    const isInstalled = installedNames.has(entry.name);
+    const status: "active" | "installed" | "not_installed" = isActive
+      ? "active"
+      : isInstalled
+        ? "installed"
+        : "not_installed";
+    const statusLabel = isActive ? "(active)" : isInstalled ? "(installed)" : "(not installed)";
+    return {
+      value: entry.name,
+      label: `${entry.name.padEnd(12)} ${statusLabel}`,
+      hint: entry.tagline,
+      status,
+      entry,
+    };
+  });
+
+  const selected = await clack.select<(typeof choices)[number]["value"]>({
+    message: "Select a plugin:",
+    options: choices.map((c) => ({ value: c.value, label: c.label, hint: c.hint })),
+  });
+
+  if (clack.isCancel(selected)) {
+    clack.outro("No changes made.");
+    process.exit(0);
+  }
+
+  const choice = choices.find((c) => c.value === selected)!;
+
+  // Already active — nothing to do
+  if (choice.status === "active") {
+    clack.outro(`${choice.entry.name} is already the active plugin.`);
+    process.exit(0);
+  }
+
+  // Installed but not active — switch directly without reinstall
+  if (choice.status === "installed") {
+    setActivePlugin(choice.entry.name);
+    clack.outro(`Switched to ${choice.entry.name}. Restarting...`);
+    try {
+      execFileSync(process.execPath, process.argv.slice(1), {
+        stdio: "inherit",
+        env: process.env,
+      });
+    } catch {
+      // execFileSync throws when the child exits — that's expected
+    }
+    process.exit(0);
+  }
+
+  // Not installed — run full install wizard
+  if (!choice.entry.skillUrl) {
+    clack.log.error(`${choice.entry.name} has no install URL.`);
+    process.exit(1);
+  }
+  await addPlugin(choice.entry.skillUrl);
+  // addPlugin() calls process.exit() in all code paths
 }
