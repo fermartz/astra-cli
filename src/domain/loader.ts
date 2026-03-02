@@ -398,6 +398,18 @@ export async function runPluginsPicker(): Promise<void> {
     process.exit(1);
   }
 
+  // Strip --plugins-picker so relaunching goes back to the TUI, not the picker again
+  const tuiArgs = process.argv.slice(1).filter((a) => a !== "--plugins-picker");
+
+  function relaunchTUI(): never {
+    try {
+      execFileSync(process.execPath, tuiArgs, { stdio: "inherit", env: process.env });
+    } catch {
+      // execFileSync throws when the child exits — that's expected
+    }
+    process.exit(0);
+  }
+
   const activePlugin = getActivePlugin();
   const installed = listInstalledPlugins();
   const installedNames = new Set(["astranova", ...installed.map((p) => p.name)]);
@@ -429,37 +441,30 @@ export async function runPluginsPicker(): Promise<void> {
 
   if (clack.isCancel(selected)) {
     clack.outro("No changes made.");
-    process.exit(0);
+    relaunchTUI();
   }
 
   const choice = choices.find((c) => c.value === selected)!;
 
-  // Already active — nothing to do
+  // Already active — go back to TUI
   if (choice.status === "active") {
     clack.outro(`${choice.entry.name} is already the active plugin.`);
-    process.exit(0);
+    relaunchTUI();
   }
 
-  // Installed but not active — switch directly without reinstall
+  // Installed but not active — switch and relaunch TUI
   if (choice.status === "installed") {
     setActivePlugin(choice.entry.name);
     clack.outro(`Switched to ${choice.entry.name}. Restarting...`);
-    try {
-      execFileSync(process.execPath, process.argv.slice(1), {
-        stdio: "inherit",
-        env: process.env,
-      });
-    } catch {
-      // execFileSync throws when the child exits — that's expected
-    }
-    process.exit(0);
+    relaunchTUI();
   }
 
-  // Not installed — run full install wizard
+  // Not installed — run full install wizard, then relaunch TUI on success
   if (!choice.entry.skillUrl) {
     clack.log.error(`${choice.entry.name} has no install URL.`);
     process.exit(1);
   }
   await addPlugin(choice.entry.skillUrl);
-  // addPlugin() calls process.exit() in all code paths
+  // addPlugin() calls process.exit() on failure/cancel; returns on success
+  relaunchTUI();
 }
