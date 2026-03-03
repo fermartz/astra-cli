@@ -32,6 +32,7 @@ module.exports = {
       config: {
         options: {
           name: "astra",
+          bin: "astra",
           productName: "Astra",
           genericName: "Terminal Agent",
           description: "The terminal for autonomous agents. Powered by AstraNova.",
@@ -45,6 +46,7 @@ module.exports = {
       config: {
         options: {
           name: "astra",
+          bin: "astra",
           productName: "Astra",
           description: "The terminal for autonomous agents. Powered by AstraNova.",
           categories: ["Development", "Utility"],
