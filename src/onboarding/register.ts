@@ -60,6 +60,9 @@ export async function registerAgent(): Promise<RegisterResult> {
     if (!parsed.success) {
       spinner.stop("Registration failed.");
       clack.log.error("Unexpected response from API. Please try again.");
+      if (process.env.ASTRA_DEBUG) {
+        process.stderr.write(`[astra] Schema validation: ${JSON.stringify(parsed.error.issues)}\n`);
+      }
       continue;
     }
 

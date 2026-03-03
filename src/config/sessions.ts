@@ -80,7 +80,7 @@ export function saveSession(params: {
       agentName: params.agentName,
       provider: params.provider,
       sessionId: params.sessionId,
-      createdAt: params.sessionId,
+      createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       coreMessages: serializeMessages(params.coreMessages),
       chatMessages: params.chatMessages.slice(-MAX_MESSAGES),

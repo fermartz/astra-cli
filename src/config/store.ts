@@ -430,8 +430,7 @@ export function getActivePlugin(): string {
  * Set the active plugin by name. Persists to state.json.
  */
 export function setActivePlugin(name: string): void {
-  const state = loadState();
-  if (!state) return;
+  const state = loadState() ?? { activePlugin: "astranova", activeAgents: {}, agents: {} };
   saveState({ ...state, activePlugin: name });
 }
 

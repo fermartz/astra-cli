@@ -74,12 +74,15 @@ export const registerAgentTool = tool({
       api_base: getActiveManifest().apiBase,
     });
 
+    // Resolve verification_code from either top-level or nested in agent
+    const verificationCode = data.verification_code ?? data.agent?.verification_code;
+
     // Update state.json with new agent
     setActiveAgent(name);
     updateAgentState(name, {
       status: "pending_verification",
       journeyStage: "fresh",
-      verificationCode: data.verification_code,
+      verificationCode,
     });
 
     // Signal the CLI to restart
@@ -89,10 +92,10 @@ export const registerAgentTool = tool({
       success: true,
       agentName: name,
       status: "pending_verification",
-      verificationCode: data.verification_code,
+      verificationCode,
       simBalance: data.agent?.simBalance ?? 10_000,
       restartRequired: true,
-      message: `Agent "${name}" registered successfully! Verification code: ${data.verification_code}. Restarting to load the new agent...`,
+      message: `Agent "${name}" registered successfully!${verificationCode ? ` Verification code: ${verificationCode}.` : ""} Restarting to load the new agent...`,
     };
   },
 });

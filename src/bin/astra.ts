@@ -286,9 +286,10 @@ async function main(): Promise<void> {
   let sessionId = newSessionId();
   let initialCoreMessages: import("ai").CoreMessage[] | undefined;
   let initialChatMessages: Array<{ role: string; content: string }> | undefined;
+  let session: ReturnType<typeof loadLatestSession> = null;
 
   if (shouldContinue) {
-    const session = loadLatestSession(agentName);
+    session = loadLatestSession(agentName);
     if (session) {
       const updatedAt = new Date(session.updatedAt);
       const minutesAgo = Math.round((Date.now() - updatedAt.getTime()) / 60_000);
@@ -305,8 +306,8 @@ async function main(): Promise<void> {
   const initialAutopilotConfig = loadAutopilotConfig();
 
   // Count trades logged by the full autopilot daemon since the last session
-  const lastSessionAt = shouldContinue
-    ? (() => { const s = loadLatestSession(agentName); return s ? new Date(s.updatedAt) : null; })()
+  const lastSessionAt = shouldContinue && session
+    ? new Date(session.updatedAt)
     : null;
   const pendingTrades = loadAutopilotLogSince(agentName, lastSessionAt);
   const initialPendingTrades = pendingTrades.length;

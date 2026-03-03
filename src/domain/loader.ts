@@ -145,7 +145,9 @@ export function extractNarrativeContent(skillMd: string): string {
 // ─── Manifest Builder ──────────────────────────────────────────────────
 
 function buildManifestFromMeta(meta: SectionData): Partial<PluginManifest> {
-  const name = typeof meta.name === "string" ? meta.name.trim() : undefined;
+  const rawName = typeof meta.name === "string" ? meta.name.trim() : undefined;
+  // Validate plugin name — same rules as agent names to prevent path traversal
+  const name = rawName && /^[a-z0-9_-]+$/.test(rawName) ? rawName : undefined;
   const version = typeof meta.version === "string" ? meta.version.trim() : "0.0.0";
   const description =
     typeof meta.description === "string" ? meta.description.trim() : (name ?? "Unknown");

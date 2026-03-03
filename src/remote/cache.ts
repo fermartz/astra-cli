@@ -47,12 +47,12 @@ export async function getCached(
 
     const content = await response.text();
 
-    // Write content and metadata
-    fs.writeFileSync(contentPath, content, "utf-8");
+    // Write content and metadata (chmod 600 — consistent with credential/config security model)
+    fs.writeFileSync(contentPath, content, { encoding: "utf-8", mode: 0o600 });
     fs.writeFileSync(
       metaPath(name),
       JSON.stringify({ fetchedAt: new Date().toISOString(), url } satisfies CacheMeta),
-      "utf-8",
+      { encoding: "utf-8", mode: 0o600 },
     );
 
     return content;
