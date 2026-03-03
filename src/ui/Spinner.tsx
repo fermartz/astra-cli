@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Text } from "ink";
 
 const FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-const INTERVAL_MS = 80;
+const INTERVAL_MS = 120;
 
 interface SpinnerProps {
   label?: string;

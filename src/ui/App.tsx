@@ -83,6 +83,30 @@ export default function App({
   useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
   const [toolName, setToolName] = useState<string | undefined>(undefined);
 
+  // Batch streaming text updates — accumulate chunks and flush every 50ms
+  // instead of re-rendering on every single token.
+  const streamBufferRef = useRef("");
+  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushStreamBuffer = useCallback(() => {
+    streamFlushTimerRef.current = null;
+    setStreamingText((prev) => (prev ?? "") + streamBufferRef.current);
+    streamBufferRef.current = "";
+  }, []);
+  const appendStreamChunk = useCallback((chunk: string) => {
+    streamBufferRef.current += chunk;
+    if (!streamFlushTimerRef.current) {
+      streamFlushTimerRef.current = setTimeout(flushStreamBuffer, 50);
+    }
+  }, [flushStreamBuffer]);
+  const clearStream = useCallback(() => {
+    if (streamFlushTimerRef.current) {
+      clearTimeout(streamFlushTimerRef.current);
+      streamFlushTimerRef.current = null;
+    }
+    streamBufferRef.current = "";
+    clearStream();
+  }, []);
+
   // Autopilot state
   const [autopilotMode, setAutopilotMode] = useState(initialAutopilotConfig?.mode ?? "off");
   const [autopilotIntervalMs, setAutopilotIntervalMs] = useState(initialAutopilotConfig?.intervalMs ?? 300_000);
@@ -168,7 +192,7 @@ export default function App({
           apiContext,
           { ...profile, autopilotMode },
           {
-            onTextChunk: displayMode === "chat" ? (chunk) => { setStreamingText((prev) => (prev ?? "") + chunk); } : () => {},
+            onTextChunk: displayMode === "chat" ? (chunk) => { appendStreamChunk(chunk); } : () => {},
             onToolCallStart: displayMode === "chat" ? (name) => { setToolName(name); } : () => {},
             onToolCallEnd: displayMode === "chat" ? () => { setToolName(undefined); } : () => {},
           },
@@ -184,7 +208,7 @@ export default function App({
 
         if (displayMode === "chat") {
           // Semi: show result as regular assistant message in chat
-          setStreamingText(undefined);
+          clearStream();
           setChatMessages((prev) => [
             ...prev,
             { role: "assistant" as const, content: responseText || "Market checked — holding." },
@@ -208,7 +232,7 @@ export default function App({
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Unknown error";
         if (displayMode === "chat") {
-          setStreamingText(undefined);
+          clearStream();
           setChatMessages((prev) => [...prev, { role: "assistant" as const, content: `Autopilot error: ${message}` }]);
         } else {
           addLogEntry("error", message);
@@ -218,7 +242,7 @@ export default function App({
         if (displayMode === "chat") setToolName(undefined);
       }
     },
-    [skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry],
+    [skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry, appendStreamChunk, clearStream, pluginMap],
   );
 
   // ── Autopilot timer (autopilot extension only) ─────────────────────
@@ -564,7 +588,7 @@ export default function App({
           { ...profile, autopilotMode },
           {
             onTextChunk: (chunk) => {
-              setStreamingText((prev) => (prev ?? "") + chunk);
+              appendStreamChunk(chunk);
             },
             onToolCallStart: (name) => {
               setToolName(name);
@@ -601,7 +625,7 @@ export default function App({
 
         setChatMessages(updatedChat);
         setCoreMessages(updatedCore);
-        setStreamingText(undefined);
+        clearStream();
 
         // Persist session to disk
         saveSession({
@@ -627,13 +651,13 @@ export default function App({
           { role: "assistant", content: `Error: ${message}${debugInfo}` },
         ]);
         setCoreMessages(newCoreMessages);
-        setStreamingText(undefined);
+        clearStream();
       } finally {
         setIsLoading(false);
         setToolName(undefined);
       }
     },
-    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry, pluginMap, hasAutopilot, hasJourneyStages, exit, debug],
+    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry, pluginMap, hasAutopilot, hasJourneyStages, exit, debug, appendStreamChunk, clearStream, runAutopilotTurn],
   );
   // Keep ref in sync so the autopilot timer always has the latest sendMessage
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
