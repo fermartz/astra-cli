@@ -105,16 +105,18 @@ function spawnPty(cols: number, rows: number): void {
   if (app.isPackaged) {
     // Production: use Electron's own Node.js runtime via ELECTRON_RUN_AS_NODE.
     // The self-contained bundle has zero external deps — no node_modules needed.
+    const isWin = process.platform === "win32";
     ptyProcess = pty.spawn(process.execPath, [cliPath], {
-      name: "xterm-256color",
+      name: isWin ? "" : "xterm-256color",
       cols,
       rows,
       cwd: os.homedir(),
+      ...(isWin ? { useConpty: true, conptyInheritCursor: true } : {}),
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: "1",
         PATH: getEnvPath(),
-        TERM: "xterm-256color",
+        ...(isWin ? {} : { TERM: "xterm-256color" }),
         COLORTERM: "truecolor",
         FORCE_COLOR: "3",
       },
