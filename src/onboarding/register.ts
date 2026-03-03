@@ -38,7 +38,7 @@ export async function registerAgent(): Promise<RegisterResult> {
     const result = await apiCall("POST", "/api/v1/agents/register", {
       name: agentName,
       description,
-    });
+    }, undefined, false);
 
     if (!result.ok) {
       spinner.stop("Registration failed.");

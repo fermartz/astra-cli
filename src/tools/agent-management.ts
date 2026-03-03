@@ -42,7 +42,7 @@ export const registerAgentTool = tool({
       verification_code?: string;
       error?: string;
       code?: string;
-    }>("POST", "/api/v1/agents/register", { name, description });
+    }>("POST", "/api/v1/agents/register", { name, description }, undefined, false);
 
     if (!result.ok) {
       return {
