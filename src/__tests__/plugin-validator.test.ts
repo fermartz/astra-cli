@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { validatePluginUrl, validateAllowedPaths, scanForInjection } from "../domain/validator.js";
-import { parseEngineSections, extractNarrativeContent } from "../domain/loader.js";
+import { parseEngineSections, extractNarrativeContent, extractRoutes } from "../domain/loader.js";
 
 // ─── validatePluginUrl ────────────────────────────────────────────────
 
@@ -260,5 +260,133 @@ describe("extractNarrativeContent", () => {
     const skillMd = `Intro\n\n## ENGINE:META\nname: x\n\n## ENGINE:AUTH\ntype: api_key\n`;
     const narrative = extractNarrativeContent(skillMd);
     expect(narrative.trim()).toBe("Intro");
+  });
+});
+
+// ─── extractRoutes ───────────────────────────────────────────────────
+
+describe("extractRoutes", () => {
+  it("extracts routes from curl commands with -X method", () => {
+    const narrative = `
+## Register
+\`\`\`bash
+curl -X POST "https://www.example.com/api/v1/agents/register" -H "Authorization: Bearer TOKEN"
+\`\`\`
+
+## Get Profile
+\`\`\`bash
+curl -X GET "https://www.example.com/api/v1/agents/me" -H "Authorization: Bearer TOKEN"
+\`\`\`
+`;
+    const routes = extractRoutes(narrative);
+    expect(routes).toEqual([
+      { method: "POST", path: "/api/v1/agents/register" },
+      { method: "GET", path: "/api/v1/agents/me" },
+    ]);
+  });
+
+  it("defaults to GET when no -X flag", () => {
+    const narrative = `\`\`\`bash\ncurl "https://api.example.com/api/v1/feed" \n\`\`\``;
+    const routes = extractRoutes(narrative);
+    expect(routes).toHaveLength(1);
+    expect(routes[0].method).toBe("GET");
+    expect(routes[0].path).toBe("/api/v1/feed");
+  });
+
+  it("deduplicates identical method+path pairs", () => {
+    const narrative = `
+curl -X POST "https://api.example.com/api/v1/posts" -d '{}'
+curl -X POST "https://api.example.com/api/v1/posts" -d '{"msg":"hi"}'
+`;
+    const routes = extractRoutes(narrative);
+    expect(routes).toHaveLength(1);
+  });
+
+  it("strips query strings from extracted paths", () => {
+    const narrative = `curl "https://api.example.com/api/v1/feed?limit=10" `;
+    const routes = extractRoutes(narrative);
+    expect(routes[0].path).toBe("/api/v1/feed");
+  });
+
+  it("returns empty array when no curl patterns found", () => {
+    expect(extractRoutes("No curl commands here.")).toEqual([]);
+  });
+});
+
+// ─── parseEngineSections — new sections ──────────────────────────────
+
+describe("parseEngineSections — ROUTES, WORKFLOWS, CAPABILITIES", () => {
+  it("parses ENGINE:ROUTES with method, path, and summary", () => {
+    const skillMd = `
+## ENGINE:ROUTES
+routes:
+  - POST /api/v1/agents/register          Register agent
+  - GET  /api/v1/agents/me                Your profile
+  - GET  /api/v1/feed                     Personalized feed
+`;
+    const sections = parseEngineSections(skillMd);
+    expect(sections["ROUTES"]).toBeDefined();
+    expect(sections["ROUTES"].routes).toEqual([
+      "POST /api/v1/agents/register          Register agent",
+      "GET  /api/v1/agents/me                Your profile",
+      "GET  /api/v1/feed                     Personalized feed",
+    ]);
+  });
+
+  it("parses ENGINE:WORKFLOWS with named step lists", () => {
+    const skillMd = `
+## ENGINE:WORKFLOWS
+onboarding:
+  - Register agent
+  - Verify identity
+  - Check dashboard
+checkin:
+  - Browse feed
+  - Reply to comments
+`;
+    const sections = parseEngineSections(skillMd);
+    expect(sections["WORKFLOWS"]).toBeDefined();
+    expect(sections["WORKFLOWS"].onboarding).toEqual([
+      "Register agent",
+      "Verify identity",
+      "Check dashboard",
+    ]);
+    expect(sections["WORKFLOWS"].checkin).toEqual([
+      "Browse feed",
+      "Reply to comments",
+    ]);
+  });
+
+  it("parses ENGINE:CAPABILITIES with boolean and string values", () => {
+    const skillMd = `
+## ENGINE:CAPABILITIES
+requiresWallet: false
+requiresVerification: true
+supportsFileUpload: false
+authType: api_key
+`;
+    const sections = parseEngineSections(skillMd);
+    expect(sections["CAPABILITIES"]).toBeDefined();
+    expect(sections["CAPABILITIES"].requiresWallet).toBe("false");
+    expect(sections["CAPABILITIES"].requiresVerification).toBe("true");
+    expect(sections["CAPABILITIES"].authType).toBe("api_key");
+  });
+
+  it("parses ENGINE:STATUS with intervalMs", () => {
+    const skillMd = `
+## ENGINE:STATUS
+poll: /api/v1/agents/me
+intervalMs: 30000
+fields:
+  - agent.karma | karma | green
+  - agent.posts_count | posts | cyan
+`;
+    const sections = parseEngineSections(skillMd);
+    expect(sections["STATUS"].poll).toBe("/api/v1/agents/me");
+    expect(sections["STATUS"].intervalMs).toBe("30000");
+    expect(sections["STATUS"].fields).toEqual([
+      "agent.karma | karma | green",
+      "agent.posts_count | posts | cyan",
+    ]);
   });
 });

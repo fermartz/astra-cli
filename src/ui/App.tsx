@@ -173,6 +173,7 @@ export default function App({
             onToolCallEnd: displayMode === "chat" ? () => { setToolName(undefined); } : () => {},
           },
           memoryContent,
+          pluginMap,
         );
 
         const baseCoreMessages = result.compactedMessages ?? newCoreMessages;
@@ -573,6 +574,7 @@ export default function App({
             },
           },
           memoryContent,
+          pluginMap,
         );
 
         // If compaction occurred, use the compacted messages as the new base

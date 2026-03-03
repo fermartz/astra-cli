@@ -20,8 +20,17 @@ export interface PluginStatusField {
 export interface PluginMap {
   version: 1;
   pluginName: string;
-  status?: { poll: string; fields: PluginStatusField[] };
+  description?: string;
+  status?: { poll: string; intervalMs?: number; fields: PluginStatusField[] };
   commands?: Array<{ command: string; description: string }>;
+  routes?: Array<{ method: string; path: string; summary?: string }>;
+  workflows?: Record<string, string[]>;
+  capabilities?: {
+    requiresWallet?: boolean;
+    requiresVerification?: boolean;
+    supportsFileUpload?: boolean;
+    authType?: string;
+  };
 }
 
 const MAX_SKILL_MD_BYTES = 1_024 * 1_024; // 1 MB
@@ -220,17 +229,49 @@ function writeFileSecure(filePath: string, data: string): void {
   fs.renameSync(tmpPath, filePath);
 }
 
+/**
+ * Extract API routes from skill.md narrative by scanning for curl patterns.
+ * Returns unique METHOD + path pairs (deduplicated).
+ */
+export function extractRoutes(narrative: string): Array<{ method: string; path: string }> {
+  const routes: Array<{ method: string; path: string }> = [];
+  const seen = new Set<string>();
+
+  const curlPattern = /curl\s+(?:-X\s+(GET|POST|PUT|PATCH|DELETE)\s+)?["']?https?:\/\/[^/\s]+(\S+?)["']?\s/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = curlPattern.exec(narrative)) !== null) {
+    const method = match[1] ?? "GET";
+    const rawPath = match[2].split("?")[0].replace(/["']/g, "");
+    const key = `${method} ${rawPath}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      routes.push({ method, path: rawPath });
+    }
+  }
+
+  return routes;
+}
+
 function buildPluginMap(
   pluginName: string,
   manifest: PluginManifest,
   sections: Record<string, SectionData>,
+  skillMd: string,
 ): PluginMap {
   const map: PluginMap = { version: 1, pluginName };
+
+  if (manifest.description) {
+    map.description = manifest.description;
+  }
 
   // ENGINE:STATUS
   const statusSection = sections["STATUS"];
   if (statusSection) {
     const poll = typeof statusSection.poll === "string" ? statusSection.poll.trim() : null;
+    const intervalMs = typeof statusSection.intervalMs === "string"
+      ? parseInt(statusSection.intervalMs, 10) || undefined
+      : undefined;
     const rawFields = Array.isArray(statusSection.fields) ? statusSection.fields : [];
     const fields: PluginStatusField[] = rawFields.flatMap((raw) => {
       const parts = (raw as string).split("|").map((s) => s.trim());
@@ -241,6 +282,7 @@ function buildPluginMap(
     const pollAllowed = poll && manifest.allowedPaths.some((ap) => poll.startsWith(ap));
     if (poll && pollAllowed && fields.length > 0) {
       map.status = { poll, fields };
+      if (intervalMs) map.status.intervalMs = intervalMs;
     }
   }
 
@@ -253,6 +295,46 @@ function buildPluginMap(
       if (match) return [{ command: match[1], description: match[2].trim() }];
       return [];
     });
+  }
+
+  // ENGINE:ROUTES (overrides auto-extraction) or auto-extract from curl patterns
+  const routesSection = sections["ROUTES"];
+  if (routesSection && Array.isArray(routesSection.routes)) {
+    map.routes = routesSection.routes.flatMap((raw) => {
+      const m = (raw as string).match(/^(GET|POST|PUT|PATCH|DELETE)\s+(\S+)(?:\s{2,}(.+))?$/);
+      if (m) return [{ method: m[1], path: m[2], summary: m[3]?.trim() }];
+      return [];
+    });
+  } else {
+    const narrative = extractNarrativeContent(skillMd);
+    const routes = extractRoutes(narrative);
+    if (routes.length > 0) map.routes = routes;
+  }
+
+  // ENGINE:WORKFLOWS
+  const workflowSection = sections["WORKFLOWS"];
+  if (workflowSection) {
+    const workflows: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(workflowSection)) {
+      if (Array.isArray(value)) {
+        workflows[key] = value;
+      }
+    }
+    if (Object.keys(workflows).length > 0) map.workflows = workflows;
+  }
+
+  // ENGINE:CAPABILITIES
+  const capSection = sections["CAPABILITIES"];
+  if (capSection) {
+    map.capabilities = {};
+    if (typeof capSection.requiresWallet === "string")
+      map.capabilities.requiresWallet = capSection.requiresWallet === "true";
+    if (typeof capSection.requiresVerification === "string")
+      map.capabilities.requiresVerification = capSection.requiresVerification === "true";
+    if (typeof capSection.supportsFileUpload === "string")
+      map.capabilities.supportsFileUpload = capSection.supportsFileUpload === "true";
+    if (typeof capSection.authType === "string")
+      map.capabilities.authType = capSection.authType;
   }
 
   return map;
@@ -276,7 +358,7 @@ function savePluginToDisk(
   ensureDir(pluginDir(manifest.name));
   writeFileSecure(pluginManifestPath(manifest.name), JSON.stringify(manifest, null, 2));
   writeFileSecure(pluginSkillPath(manifest.name), skillMdContent);
-  const pluginMap = buildPluginMap(manifest.name, manifest, sections);
+  const pluginMap = buildPluginMap(manifest.name, manifest, sections, skillMdContent);
   writeFileSecure(pluginMapPath(manifest.name), JSON.stringify(pluginMap, null, 2));
 }
 

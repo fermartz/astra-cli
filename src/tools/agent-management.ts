@@ -17,14 +17,14 @@ import { stopDaemon } from "../daemon/daemon-manager.js";
 import { getActiveManifest } from "../domain/plugin.js";
 
 /**
- * register_agent tool — registers a new agent with the AstraNova API.
+ * register_agent tool — registers a new agent with the active plugin's API.
  *
  * Saves credentials locally and updates state.json.
  * Returns a restart hint so the LLM can tell the user.
  */
 export const registerAgentTool = tool({
   description:
-    "Register a new AstraNova agent. Calls the API, saves credentials locally, and sets the new agent as active. The CLI will need to restart after this to load the new agent's context.",
+    "Register a new agent. Calls the API, saves credentials locally, and sets the new agent as active. The CLI will need to restart after this to load the new agent's context.",
   parameters: registerAgentSchema,
   execute: async ({ name, description }) => {
     // Validate name format
@@ -152,7 +152,7 @@ export const switchAgentTool = tool({
  */
 export const listAgentsTool = tool({
   description:
-    "List all AstraNova agents registered on this machine, showing which one is active.",
+    "List all agents registered on this machine, showing which one is active.",
   parameters: z.object({}),
   execute: async () => {
     const agents = listAgents();

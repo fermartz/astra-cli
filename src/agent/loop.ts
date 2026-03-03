@@ -3,6 +3,7 @@ import { zodToJsonSchema } from "zod-to-json-schema";
 import type { ZodType } from "zod";
 import { getModel, isCodexOAuth, isOpenAIResponses, getCodexAccessToken, getOpenAIApiKey } from "./provider.js";
 import { buildSystemPrompt, type AgentProfile } from "./system-prompt.js";
+import type { PluginMap } from "../domain/loader.js";
 import { buildAstraTools } from "../tools/index.js";
 import { callCodex, callCodexWithRetry, convertToolsForCodex, type CodexInputItem } from "./codex-provider.js";
 import { loadConfig } from "../config/store.js";
@@ -65,8 +66,9 @@ export async function runAgentTurn(
   profile: AgentProfile,
   callbacks: AgentLoopCallbacks,
   memoryContent?: string,
+  pluginMap?: PluginMap | null,
 ): Promise<AgentLoopResult> {
-  const systemPrompt = buildSystemPrompt(skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, memoryContent);
+  const systemPrompt = buildSystemPrompt(skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, memoryContent, pluginMap);
   const config = loadConfig();
   const provider = config?.provider ?? "openai";
 

@@ -70,7 +70,8 @@ const StatusBar = React.memo(function StatusBar({
     };
 
     void fetchPlugin();
-    const interval = setInterval(() => void fetchPlugin(), POLL_INTERVAL_MS);
+    const pollInterval = pluginMap?.status?.intervalMs ?? POLL_INTERVAL_MS;
+    const interval = setInterval(() => void fetchPlugin(), pollInterval);
     return () => {
       mountedPlugin.current = false;
       clearInterval(interval);

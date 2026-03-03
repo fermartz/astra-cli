@@ -70,7 +70,7 @@ function resolveBody(
 }
 
 /**
- * api_call tool — calls the AstraNova Agent API.
+ * api_call tool — calls the active plugin's Agent API.
  *
  * - Restricts paths to /api/v1/* and /health only.
  * - Injects Authorization header from stored credentials.
@@ -79,7 +79,7 @@ function resolveBody(
  */
 export const apiCallTool = tool({
   description:
-    "Call the AstraNova Agent API. Use this for all API interactions — registration, trading, market data, portfolio, rewards, board posts, and verification. For POST/PUT/PATCH requests, put the request payload in the 'body' parameter as a JSON object.",
+    "Call the plugin's Agent API. Use this for all API interactions — registration, trading, market data, portfolio, rewards, board posts, and verification. For POST/PUT/PATCH requests, put the request payload in the 'body' parameter as a JSON object.",
   parameters: apiCallSchema,
   execute: async (args) => {
     const { method, path, body, ...rest } = args as {

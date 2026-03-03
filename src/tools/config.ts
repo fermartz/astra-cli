@@ -10,12 +10,13 @@ import {
   listAgents,
 } from "../config/store.js";
 import { agentDir, ensureDir } from "../config/paths.js";
+import { getActiveManifest } from "../domain/plugin.js";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 
 /**
- * read_config tool — read local AstraNova configuration.
+ * read_config tool — read local agent configuration.
  *
  * SECURITY: Never returns private keys or raw API keys.
  * - Wallet data returns publicKey only (secretKey stripped).
@@ -23,7 +24,7 @@ import crypto from "node:crypto";
  */
 export const readConfigTool = tool({
   description:
-    "Read local AstraNova configuration or credentials. Returns public information only — private keys and API keys are never included.",
+    "Read local agent configuration or credentials. Returns public information only — private keys and API keys are never included.",
   parameters: readConfigSchema,
   execute: async ({ key, agentName }) => {
     const resolvedAgent = agentName ?? getActiveAgent();
@@ -87,7 +88,7 @@ export const readConfigTool = tool({
 });
 
 /**
- * write_config tool — write local AstraNova configuration.
+ * write_config tool — write local agent configuration.
  *
  * SECURITY:
  * - Rejects writes to wallet.json (wallet tools handle that separately).
@@ -96,7 +97,7 @@ export const readConfigTool = tool({
  */
 export const writeConfigTool = tool({
   description:
-    "Write local AstraNova configuration. Used to save agent credentials after registration or update profile data. Cannot write wallet files — use wallet tools instead.",
+    "Write local agent configuration. Used to save agent credentials after registration or update profile data. Cannot write wallet files — use wallet tools instead.",
   parameters: writeConfigSchema,
   execute: async ({ agentName, data, file }) => {
     // Reject wallet writes — those go through dedicated wallet tools
@@ -118,7 +119,7 @@ export const writeConfigTool = tool({
       saveCredentials(agentName, {
         agent_name: (merged.agent_name as string) ?? agentName,
         api_key: (merged.api_key as string) ?? "",
-        api_base: (merged.api_base as string) ?? "https://agents.astranova.live",
+        api_base: (merged.api_base as string) ?? getActiveManifest().apiBase,
       });
     } else {
       // For profile and settings, write directly with chmod 600

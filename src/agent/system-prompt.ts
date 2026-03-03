@@ -1,4 +1,5 @@
 import { getActiveManifest } from "../domain/plugin.js";
+import type { PluginMap } from "../domain/loader.js";
 
 export type JourneyStage = "fresh" | "pending" | "verified" | "trading" | "wallet_ready" | "full";
 
@@ -38,12 +39,13 @@ export function buildSystemPrompt(
   apiContext: string,
   profile: AgentProfile,
   memoryContent?: string,
+  pluginMap?: PluginMap | null,
 ): string {
   // Non-AstraNova plugins get a minimal generic prompt — none of the
   // AstraNova journey guidance, trading context, or rich tool overrides apply.
   const manifest = getActiveManifest();
   if (!manifest.extensions?.journeyStages) {
-    return buildGenericSystemPrompt(skillContext, manifest.name, manifest.description, profile, memoryContent);
+    return buildGenericSystemPrompt(skillContext, manifest.name, manifest.description, profile, memoryContent, pluginMap);
   }
 
   const stage = profile.journeyStage ?? "full";
@@ -178,6 +180,7 @@ function buildGenericSystemPrompt(
   pluginDescription: string,
   profile: AgentProfile,
   memoryContent?: string,
+  pluginMap?: PluginMap | null,
 ): string {
   const workingSpace = `~/.config/astra/spaces/${pluginName}`;
 
@@ -235,6 +238,44 @@ function buildGenericSystemPrompt(
       "---",
       "",
     );
+
+    // Structured context from plugin-map.json (routes, workflows, capabilities)
+    if (pluginMap?.routes && pluginMap.routes.length > 0) {
+      parts.push("## Available API Routes", "");
+      parts.push("Quick reference — use `api_call` with these relative paths:", "");
+      parts.push("```");
+      for (const r of pluginMap.routes) {
+        const line = r.summary
+          ? `${r.method.padEnd(7)} ${r.path.padEnd(45)} ${r.summary}`
+          : `${r.method.padEnd(7)} ${r.path}`;
+        parts.push(line);
+      }
+      parts.push("```");
+      parts.push("", "---", "");
+    }
+
+    if (pluginMap?.workflows) {
+      parts.push("## Workflows", "");
+      for (const [name, steps] of Object.entries(pluginMap.workflows)) {
+        parts.push(`**${name}:**`);
+        steps.forEach((step, i) => parts.push(`${i + 1}. ${step}`));
+        parts.push("");
+      }
+      parts.push("---", "");
+    }
+
+    if (pluginMap?.capabilities) {
+      const cap = pluginMap.capabilities;
+      const notes: string[] = [];
+      if (cap.requiresWallet === false) notes.push("This plugin does NOT use wallets — do not suggest wallet setup.");
+      if (cap.requiresVerification) notes.push("Content may require verification challenges — handle them automatically.");
+      if (cap.supportsFileUpload === false) notes.push("File upload is not supported — do not attempt multipart requests.");
+      if (notes.length > 0) {
+        parts.push("## Plugin Notes", "");
+        notes.forEach(n => parts.push(`- ${n}`));
+        parts.push("", "---", "");
+      }
+    }
 
     parts.push(`## ${pluginName} — Skill Documentation`, "");
     parts.push(sanitizedSkill);

@@ -1,5 +1,6 @@
 import { loadCredentials, loadConfig } from "../config/store.js";
 import { withRetry, type RetryOptions } from "./retry.js";
+import { getActiveManifest } from "../domain/plugin.js";
 
 /** Default timeout for a single API attempt (15s when retrying, 30s without). */
 const FETCH_TIMEOUT_MS = 30_000;
@@ -22,9 +23,9 @@ export interface ApiError {
 export type ApiResult<T = unknown> = ApiResponse<T> | ApiError;
 
 /**
- * Call the AstraNova Agent API.
+ * Call the active plugin's Agent API.
  *
- * - Reads base URL from config (default: https://agents.astranova.live).
+ * - Resolves base URL: agent credentials > plugin manifest > config > hardcoded fallback.
  * - Injects Authorization header from agent credentials when agentName is provided.
  * - Returns structured result — never throws on HTTP errors.
  * - No secrets appear in error messages.
@@ -43,9 +44,17 @@ export async function apiCall<T = unknown>(
     "Content-Type": "application/json",
   };
 
-  // Use the agent's credentials api_base when available — each plugin registers
-  // its own api_base (e.g. moltbook vs astranova). Fall back to config.apiBase.
+  // Priority: creds.api_base > manifest.apiBase > config.apiBase > hardcoded fallback
   let baseUrl = config?.apiBase ?? "https://agents.astranova.live";
+
+  // Tier 2: active plugin manifest (authoritative for the current session)
+  try {
+    baseUrl = getActiveManifest().apiBase;
+  } catch {
+    // Manifest not set yet (early startup or tests) — keep config/hardcoded fallback
+  }
+
+  // Tier 1: agent credentials (most specific — set during registration from manifest)
   if (agentName) {
     const creds = loadCredentials(agentName);
     if (creds?.api_base) {
@@ -88,7 +97,7 @@ export async function apiCall<T = unknown>(
           ok: false,
           status: 0,
           error: `Request to ${path} timed out after ${timeoutMs / 1000}s`,
-          hint: "The AstraNova API may be slow or unreachable. Try again.",
+          hint: "The API server may be slow or unreachable. Try again.",
         };
       }
 
