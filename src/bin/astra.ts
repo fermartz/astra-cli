@@ -3,6 +3,7 @@ import React from "react";
 import { render } from "ink";
 import { execFileSync } from "node:child_process";
 import { setActiveManifest } from "../domain/plugin.js";
+import AppErrorBoundary from "../ui/AppErrorBoundary.js";
 import { ASTRANOVA_MANIFEST } from "../domain/astranova/manifest.js";
 import {
   isConfigured,
@@ -314,24 +315,26 @@ async function main(): Promise<void> {
 
   // Step 9: Launch Ink TUI
   const { waitUntilExit } = render(
-    React.createElement(App, {
-      agentName,
-      skillContext,
-      tradingContext,
-      walletContext,
-      rewardsContext,
-      onboardingContext,
-      apiContext,
-      profile,
-      sessionId,
-      memoryContent,
-      initialCoreMessages,
-      initialChatMessages,
-      initialAutopilotConfig,
-      initialPendingTrades,
-      debug,
-      pluginMap,
-    }),
+    React.createElement(AppErrorBoundary, null,
+      React.createElement(App, {
+        agentName,
+        skillContext,
+        tradingContext,
+        walletContext,
+        rewardsContext,
+        onboardingContext,
+        apiContext,
+        profile,
+        sessionId,
+        memoryContent,
+        initialCoreMessages,
+        initialChatMessages,
+        initialAutopilotConfig,
+        initialPendingTrades,
+        debug,
+        pluginMap,
+      }),
+    ),
   );
 
   await waitUntilExit();

@@ -1,6 +1,7 @@
 import React from "react";
 import { Box, Text } from "ink";
 import MarkdownText from "./MarkdownText.js";
+import ErrorBoundary from "./ErrorBoundary.js";
 
 export interface ChatMessage {
   role: "user" | "assistant" | "log" | "autopilot";
@@ -43,7 +44,9 @@ export default function ChatView({
             </Text>
             <Box marginLeft={1}>
               {msg.role === "assistant" ? (
-                <MarkdownText>{msg.content}</MarkdownText>
+                <ErrorBoundary>
+                  <MarkdownText>{msg.content}</MarkdownText>
+                </ErrorBoundary>
               ) : (
                 <Text wrap="wrap">{msg.content}</Text>
               )}
@@ -58,7 +61,9 @@ export default function ChatView({
             {" Agent"}
           </Text>
           <Box marginLeft={1}>
-            <MarkdownText>{streamingText}</MarkdownText>
+            <ErrorBoundary>
+              <MarkdownText>{streamingText}</MarkdownText>
+            </ErrorBoundary>
           </Box>
         </Box>
       )}
