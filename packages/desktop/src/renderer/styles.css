@@ -1,0 +1,88 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #002633;
+}
+
+#terminal {
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  padding-bottom: 12px;
+}
+
+/* Hide scrollbar but keep scroll functionality */
+.xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+/* macOS: leave room for traffic lights */
+@supports (-webkit-app-region: drag) {
+  #terminal {
+    padding-top: 36px;
+  }
+}
+
+/* Title bar drag region */
+body::before {
+  content: "";
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  -webkit-app-region: drag;
+  z-index: 10;
+}
+
+/* Exit overlay */
+#exit-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 100;
+}
+
+#exit-overlay.hidden {
+  display: none;
+}
+
+.exit-message {
+  text-align: center;
+  color: #888;
+  font-family: "SF Mono", "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 14px;
+}
+
+.exit-message p {
+  margin-bottom: 16px;
+}
+
+#restart-btn {
+  background: #333;
+  color: #ccc;
+  border: 1px solid #555;
+  padding: 8px 24px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+#restart-btn:hover {
+  background: #444;
+  color: #fff;
+}

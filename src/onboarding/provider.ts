@@ -18,7 +18,7 @@ interface ProviderChoice {
   auth: Config["auth"];
 }
 
-const DEFAULT_MODELS: Record<string, string> = {
+export const DEFAULT_MODELS: Record<string, string> = {
   "openai-oauth": "gpt-5.3-codex",
   claude: "claude-sonnet-4-20250514",
   openai: "gpt-4o-mini",
@@ -226,7 +226,7 @@ async function exchangeAndReturn(
 
 // ─── Browser Open ──────────────────────────────────────────────────────
 
-function openBrowser(url: string): void {
+export function openBrowser(url: string): void {
   const command =
     process.platform === "darwin"
       ? `open "${url}"`
@@ -311,7 +311,7 @@ interface ValidationResult {
 /**
  * Validate an API key by making a lightweight call to the provider.
  */
-async function validateApiKey(provider: string, apiKey: string): Promise<ValidationResult> {
+export async function validateApiKey(provider: string, apiKey: string): Promise<ValidationResult> {
   try {
     switch (provider) {
       case "claude": {

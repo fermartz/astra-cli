@@ -24,6 +24,7 @@ export const ConfigSchema = z.object({
       .optional(),
   }),
   apiBase: z.string().default("https://agents.astranova.live"),
+  savedKeys: z.record(z.string()).optional(),
   preferences: z
     .object({
       theme: z.enum(["dark", "light"]).default("dark"),

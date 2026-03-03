@@ -1,0 +1,43 @@
+{
+  "name": "@astra-cli/desktop",
+  "productName": "Astra",
+  "version": "0.1.0",
+  "description": "The terminal for autonomous agents. Powered by AstraNova.",
+  "private": true,
+  "main": "dist/main.js",
+  "author": {
+    "name": "fermartz",
+    "url": "https://github.com/fermartz"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fermartz/astra-cli.git"
+  },
+  "homepage": "https://github.com/fermartz/astra-cli",
+  "scripts": {
+    "postinstall": "node scripts/patch-electron-name.mjs",
+    "compile": "tsc && node build-renderer.mjs",
+    "dev": "pnpm compile && electron-forge start",
+    "build": "pnpm compile && node scripts/stage-native-modules.mjs && electron-forge make",
+    "package": "pnpm compile && node scripts/stage-native-modules.mjs && electron-forge package"
+  },
+  "dependencies": {
+    "node-addon-api": "^7.1.1",
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.6.0",
+    "@electron-forge/maker-dmg": "^7.6.0",
+    "@electron-forge/maker-deb": "^7.6.0",
+    "@electron-forge/maker-rpm": "^7.6.0",
+    "@electron-forge/maker-squirrel": "^7.6.0",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.6.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-webgl": "^0.18.0",
+    "@xterm/xterm": "^5.5.0",
+    "esbuild": "^0.25.0",
+    "electron": "^34.0.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -7,40 +7,12 @@
 const GREEN = "\x1b[38;2;184;245;78m"; // #b8f54e in 24-bit true color
 const RESET = "\x1b[0m";
 
-const ROBOT = `
-         __
- _(\\    |@@|
-(__/\\__ \\--/ __
-   \\___|----|  |   __
-       \\ /\\ /\\ )_ / _\\
-       /\\__/\\ \\__O (__
-      (--/\\--)    \\__/
-      _)(  )(_
-     \`---''---\``;
-
-const ALIEN = `
-     o            o
-      \\          /
-       \\        /
-        :-'""'-:
-     .-'  ____  \`-.
-    ( (  (_()_)  ) )
-     \`-.   ^^   .-'
-        \`._==_.'
-         __)(___`;
-
 const ASTRA_CLI = `
       _    ____ _____ ____      _         _______      _____
      / \\  / ___|_   _|  _ \\    / \\       /  ___| |    |_____|
     / _ \\ \\___ \\ | | | |_) |  / _ \\      | |   | |      | |
    / ___ \\ ___) || | |  _ <  / ___ \\     | |___| |___   | |
   /_/   \\_\\____/ |_| |_| \\_\\/_/   \\_\\    \\_____|_____||_____|`;
-
-const CLI = `
-   ___ _    ___
-  / __| |  |_ _|
- | (__| |__ | |
-  \\___|____|___|`;
 
 const ASTRONAUT = `
         _..._
@@ -79,6 +51,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(resolve(__dirname, "..", "package.json"), "utf-8"));
-export const VERSION = `${GREEN}v${pkg.version}${RESET}`;
+let version = "0.0.0";
+try {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const pkg = JSON.parse(readFileSync(resolve(__dirname, "..", "package.json"), "utf-8"));
+  version = pkg.version;
+} catch {
+  // Desktop bundle: package.json not alongside the bundle — use injected version
+}
+export const VERSION = `${GREEN}v${version}${RESET}`;

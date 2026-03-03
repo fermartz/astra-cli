@@ -3,6 +3,9 @@ node_modules/
 
 # Build output
 dist/
+dist-desktop/
+packages/desktop/dist/
+packages/desktop/out/
 
 # Environment / secrets
 .env

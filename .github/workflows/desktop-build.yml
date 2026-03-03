@@ -1,0 +1,91 @@
+name: Desktop Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "desktop-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macOS-arm64
+          - os: macos-13
+            platform: macOS-x64
+          - os: ubuntu-latest
+            platform: Linux
+          - os: windows-latest
+            platform: Windows
+
+    runs-on: ${{ matrix.os }}
+    name: Build — ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Install root deps (CLI source + tsup for desktop bundle)
+      - name: Install root dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Install desktop package deps (electron, node-pty, forge)
+      - name: Install desktop dependencies
+        run: pnpm install --frozen-lockfile
+        working-directory: packages/desktop
+
+      # Bundle CLI into self-contained dist-desktop/astra.js
+      - name: Bundle CLI for desktop
+        run: pnpm desktop:bundle
+
+      # Compile desktop TypeScript + build renderer
+      - name: Compile desktop
+        run: pnpm compile
+        working-directory: packages/desktop
+
+      # Stage native modules (resolve pnpm symlinks for packager)
+      - name: Stage native modules
+        run: node scripts/stage-native-modules.mjs
+        working-directory: packages/desktop
+
+      # Build platform-specific installer
+      - name: Make installer
+        run: npx electron-forge make
+        working-directory: packages/desktop
+
+      # Upload artifacts
+      - name: Upload macOS DMG
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Astra-${{ matrix.platform }}
+          path: packages/desktop/out/make/**/*.dmg
+
+      - name: Upload Linux packages
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Astra-${{ matrix.platform }}
+          path: |
+            packages/desktop/out/make/**/*.deb
+            packages/desktop/out/make/**/*.rpm
+
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Astra-${{ matrix.platform }}
+          path: packages/desktop/out/make/**/*.exe

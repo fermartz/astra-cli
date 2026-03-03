@@ -6,9 +6,20 @@ import ChatView, { type ChatMessage } from "./ChatView.js";
 import Input from "./Input.js";
 import Spinner from "./Spinner.js";
 import { runAgentTurn } from "../agent/loop.js";
-import { isRestartRequested, loadConfig, saveAutopilotConfig, loadEpochBudget, saveEpochBudget, appendAutopilotLog, loadAutopilotLogSince, requestPluginsPicker } from "../config/store.js";
+import { isRestartRequested, loadConfig, saveConfig, saveAutopilotConfig, loadEpochBudget, saveEpochBudget, appendAutopilotLog, loadAutopilotLogSince, requestPluginsPicker } from "../config/store.js";
+import { validateApiKey, DEFAULT_MODELS, openBrowser } from "../onboarding/provider.js";
+import {
+  generatePkce,
+  generateState,
+  buildAuthorizeUrl,
+  exchangeCodeForTokens,
+  parseCallbackUrl,
+  REDIRECT_URI,
+} from "../onboarding/oauth.js";
+import { waitForCallback } from "../onboarding/callback-server.js";
 import { saveSession } from "../config/sessions.js";
 import type { AgentProfile } from "../agent/system-prompt.js";
+import type { Config } from "../config/schema.js";
 import type { AutopilotConfig } from "../autopilot/scheduler.js";
 import {
   buildAutopilotTrigger,
@@ -83,29 +94,11 @@ export default function App({
   useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
   const [toolName, setToolName] = useState<string | undefined>(undefined);
 
-  // Batch streaming text updates — accumulate chunks and flush every 50ms
-  // instead of re-rendering on every single token.
-  const streamBufferRef = useRef("");
-  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flushStreamBuffer = useCallback(() => {
-    streamFlushTimerRef.current = null;
-    setStreamingText((prev) => (prev ?? "") + streamBufferRef.current);
-    streamBufferRef.current = "";
-  }, []);
-  const appendStreamChunk = useCallback((chunk: string) => {
-    streamBufferRef.current += chunk;
-    if (!streamFlushTimerRef.current) {
-      streamFlushTimerRef.current = setTimeout(flushStreamBuffer, 50);
-    }
-  }, [flushStreamBuffer]);
-  const clearStream = useCallback(() => {
-    if (streamFlushTimerRef.current) {
-      clearTimeout(streamFlushTimerRef.current);
-      streamFlushTimerRef.current = null;
-    }
-    streamBufferRef.current = "";
-    setStreamingText(undefined);
-  }, []);
+  // /model command state — provider ID awaiting API key input, or "oauth-paste" for manual OAuth URL
+  const [awaitingApiKey, setAwaitingApiKey] = useState<string | null>(null);
+  const [validatingKey, setValidatingKey] = useState(false);
+  // OAuth PKCE verifier stored while waiting for callback/paste
+  const oauthVerifierRef = useRef<string | null>(null);
 
   // Autopilot state
   const [autopilotMode, setAutopilotMode] = useState(initialAutopilotConfig?.mode ?? "off");
@@ -192,7 +185,7 @@ export default function App({
           apiContext,
           { ...profile, autopilotMode },
           {
-            onTextChunk: displayMode === "chat" ? (chunk) => { appendStreamChunk(chunk); } : () => {},
+            onTextChunk: displayMode === "chat" ? (chunk) => { setStreamingText((prev) => (prev ?? "") + chunk); } : () => {},
             onToolCallStart: displayMode === "chat" ? (name) => { setToolName(name); } : () => {},
             onToolCallEnd: displayMode === "chat" ? () => { setToolName(undefined); } : () => {},
           },
@@ -208,7 +201,7 @@ export default function App({
 
         if (displayMode === "chat") {
           // Semi: show result as regular assistant message in chat
-          clearStream();
+          setStreamingText(undefined);
           setChatMessages((prev) => [
             ...prev,
             { role: "assistant" as const, content: responseText || "Market checked — holding." },
@@ -232,7 +225,7 @@ export default function App({
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : "Unknown error";
         if (displayMode === "chat") {
-          clearStream();
+          setStreamingText(undefined);
           setChatMessages((prev) => [...prev, { role: "assistant" as const, content: `Autopilot error: ${message}` }]);
         } else {
           addLogEntry("error", message);
@@ -242,7 +235,7 @@ export default function App({
         if (displayMode === "chat") setToolName(undefined);
       }
     },
-    [skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry, appendStreamChunk, clearStream, pluginMap],
+    [skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry, pluginMap],
   );
 
   // ── Autopilot timer (autopilot extension only) ─────────────────────
@@ -282,6 +275,118 @@ export default function App({
   const sendMessage = useCallback(
     async (userText: string, displayRole: "user" | "autopilot" = "user") => {
       let skipChatDisplay = false;
+
+      // ── Awaiting API key or OAuth callback URL for /model flow ────
+      if (awaitingApiKey) {
+        // /model cancels the flow and re-handles as a command
+        if (userText.startsWith("/model")) {
+          setAwaitingApiKey(null);
+          oauthVerifierRef.current = null;
+          // Fall through — will be handled as /model command below
+        } else if (awaitingApiKey.startsWith("oauth-paste:")) {
+          // Manual OAuth callback URL paste (fallback when callback server fails)
+          const expectedState = awaitingApiKey.slice("oauth-paste:".length);
+          const trimmed = userText.trim();
+          if (!trimmed) return;
+
+          const parsed = parseCallbackUrl(trimmed, expectedState);
+          if ("error" in parsed) {
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: trimmed.slice(0, 40) + "..." },
+              { role: "assistant", content: `${parsed.error}\n\nPaste the full redirect URL, or type \`/model\` to cancel.` },
+            ]);
+            return;
+          }
+
+          const verifier = oauthVerifierRef.current;
+          if (!verifier) {
+            setAwaitingApiKey(null);
+            setChatMessages((prev) => [...prev, { role: "assistant", content: "OAuth session expired. Try `/model codex` again." }]);
+            return;
+          }
+
+          setValidatingKey(true);
+          setChatMessages((prev) => [...prev, { role: "user", content: trimmed.slice(0, 40) + "..." }]);
+
+          try {
+            const tokens = await exchangeCodeForTokens({ code: parsed.code, codeVerifier: verifier });
+            oauthVerifierRef.current = null;
+            setValidatingKey(false);
+
+            const cfg = loadConfig()!;
+            if (cfg.auth.type === "api-key" && cfg.auth.apiKey) {
+              cfg.savedKeys = { ...cfg.savedKeys, [cfg.provider]: cfg.auth.apiKey };
+            }
+            cfg.provider = "openai-oauth";
+            cfg.model = DEFAULT_MODELS["openai-oauth"] ?? "gpt-5.3-codex";
+            cfg.auth = {
+              type: "oauth",
+              oauth: { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken, expiresAt: tokens.expiresAt, clientId: tokens.clientId },
+            };
+            saveConfig(cfg);
+            providerRef.current = "openai-oauth";
+            setAwaitingApiKey(null);
+
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: `Switched to **Codex** (${DEFAULT_MODELS["openai-oauth"]})` },
+            ]);
+          } catch (error: unknown) {
+            setValidatingKey(false);
+            const msg = error instanceof Error ? error.message : "Unknown error";
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: `OAuth token exchange failed: ${msg}\n\nTry \`/model codex\` again.` },
+            ]);
+            setAwaitingApiKey(null);
+            oauthVerifierRef.current = null;
+          }
+          return;
+        } else {
+          // API key paste flow
+          const trimmedKey = userText.trim();
+          if (!trimmedKey) return;
+
+          setValidatingKey(true);
+          setChatMessages((prev) => [...prev, { role: "user", content: "••••••••" }]);
+
+          const result = await validateApiKey(awaitingApiKey, trimmedKey);
+          setValidatingKey(false);
+
+          if (!result.ok) {
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "assistant", content: `Key validation failed: ${result.error}\n\nPaste a valid key to retry, or type \`/model\` to cancel.` },
+            ]);
+            return;
+          }
+
+          // Valid key — save and switch
+          const targetProvider = awaitingApiKey;
+          const config = loadConfig()!;
+          // Save current key to savedKeys before switching
+          if (config.auth.type === "api-key" && config.auth.apiKey) {
+            config.savedKeys = { ...config.savedKeys, [config.provider]: config.auth.apiKey };
+          }
+          config.provider = targetProvider as Config["provider"];
+          config.model = DEFAULT_MODELS[targetProvider] ?? "";
+          config.auth = { type: "api-key", apiKey: trimmedKey };
+          // Also save the new key to savedKeys
+          config.savedKeys = { ...config.savedKeys, [targetProvider]: trimmedKey };
+          saveConfig(config);
+          providerRef.current = targetProvider;
+
+          setAwaitingApiKey(null);
+          const modelName = DEFAULT_MODELS[targetProvider] ?? targetProvider;
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `Switched to **${providerLabel(targetProvider)}** (${modelName})` },
+          ]);
+          return;
+        }
+      }
+
       // ── Slash commands (handled locally, never sent to LLM) ────
       if (userText.startsWith("/")) {
         const parts = userText.trim().split(/\s+/);
@@ -314,6 +419,155 @@ export default function App({
           ]);
           requestPluginsPicker();
           setTimeout(() => exit(), 800);
+          return;
+        }
+
+        // ── /model — switch LLM provider inline ────
+        if (cmd === "/model") {
+          const arg = parts[1]?.toLowerCase();
+          const config = loadConfig()!;
+          const currentProvider = config.provider;
+          const currentModel = config.model;
+
+          if (!arg) {
+            // Show current provider + available options
+            const available = ["claude", "openai", "gemini", "codex"].filter(
+              (p) => p !== providerAlias(currentProvider),
+            );
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              {
+                role: "assistant",
+                content: `**Current provider:** ${providerLabel(currentProvider)} (${currentModel})\n\n**Switch to:** ${available.map((p) => `\`/model ${p}\``).join(" · ")}`,
+              },
+            ]);
+            return;
+          }
+
+          // Resolve alias → provider ID
+          const providerAliases: Record<string, string> = {
+            claude: "claude", anthropic: "claude",
+            openai: "openai", gpt: "openai",
+            gemini: "google", google: "google",
+            codex: "openai-oauth", chatgpt: "openai-oauth",
+          };
+          const targetProvider = providerAliases[arg];
+
+          if (!targetProvider) {
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `Unknown provider: \`${arg}\`. Available: \`claude\` · \`openai\` · \`gemini\` · \`codex\`` },
+            ]);
+            return;
+          }
+
+          // Already on this provider
+          if (targetProvider === currentProvider) {
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `Already using **${providerLabel(targetProvider)}** (${currentModel})` },
+            ]);
+            return;
+          }
+
+          // Codex — inline OAuth flow (open browser + callback server)
+          if (targetProvider === "openai-oauth") {
+            const { verifier, challenge } = generatePkce();
+            const oauthState = generateState();
+            const authorizeUrl = buildAuthorizeUrl({ state: oauthState, challenge });
+            oauthVerifierRef.current = verifier;
+
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: "Opening browser for ChatGPT login..." },
+            ]);
+            setValidatingKey(true);
+            openBrowser(authorizeUrl);
+
+            // Try automatic callback server
+            try {
+              const result = await waitForCallback({
+                redirectUri: REDIRECT_URI,
+                expectedState: oauthState,
+              });
+              // Exchange code for tokens
+              const tokens = await exchangeCodeForTokens({ code: result.code, codeVerifier: verifier });
+              oauthVerifierRef.current = null;
+              setValidatingKey(false);
+
+              // Save current key before switching
+              const cfg = loadConfig()!;
+              if (cfg.auth.type === "api-key" && cfg.auth.apiKey) {
+                cfg.savedKeys = { ...cfg.savedKeys, [cfg.provider]: cfg.auth.apiKey };
+              }
+              cfg.provider = "openai-oauth";
+              cfg.model = DEFAULT_MODELS["openai-oauth"] ?? "gpt-5.3-codex";
+              cfg.auth = {
+                type: "oauth",
+                oauth: {
+                  accessToken: tokens.accessToken,
+                  refreshToken: tokens.refreshToken,
+                  expiresAt: tokens.expiresAt,
+                  clientId: tokens.clientId,
+                },
+              };
+              saveConfig(cfg);
+              providerRef.current = "openai-oauth";
+
+              setChatMessages((prev) => [
+                ...prev,
+                { role: "assistant", content: `Switched to **Codex** (${DEFAULT_MODELS["openai-oauth"]})` },
+              ]);
+            } catch {
+              // Callback server failed (port conflict or timeout) — fall back to manual paste
+              setValidatingKey(false);
+              setAwaitingApiKey("oauth-paste:" + oauthState);
+              setChatMessages((prev) => [
+                ...prev,
+                { role: "assistant", content: `Couldn't detect the callback automatically.\n\nPaste the redirect URL from your browser here, or type \`/model\` to cancel.\n\n${authorizeUrl}` },
+              ]);
+            }
+            return;
+          }
+
+          // Check savedKeys first
+          const savedKey = config.savedKeys?.[targetProvider];
+          if (savedKey) {
+            // Save current key before switching
+            if (config.auth.type === "api-key" && config.auth.apiKey) {
+              config.savedKeys = { ...config.savedKeys, [config.provider]: config.auth.apiKey };
+            }
+            config.provider = targetProvider as Config["provider"];
+            config.model = DEFAULT_MODELS[targetProvider] ?? "";
+            config.auth = { type: "api-key", apiKey: savedKey };
+            saveConfig(config);
+            providerRef.current = targetProvider;
+
+            const modelName = DEFAULT_MODELS[targetProvider] ?? targetProvider;
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `Switched to **${providerLabel(targetProvider)}** (${modelName})` },
+            ]);
+            return;
+          }
+
+          // No saved key — prompt for one
+          const keyLabels: Record<string, string> = {
+            claude: "Anthropic API key",
+            openai: "OpenAI API key",
+            google: "Google AI API key",
+          };
+          setAwaitingApiKey(targetProvider);
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "user", content: userText },
+            { role: "assistant", content: `Enter your ${keyLabels[targetProvider] ?? "API key"}. Your key is stored locally and never shared with the AI model.` },
+          ]);
           return;
         }
 
@@ -517,6 +771,7 @@ export default function App({
           helpLines.push(
             "**System**",
             "",
+            "  `/model`     — Show or switch LLM provider",
             "  `/plugins`   — Browse and switch plugins",
             "  `/help`      — Show this help",
             "  `/exit`      — Exit (also `/quit`, `/q`)",
@@ -588,7 +843,7 @@ export default function App({
           { ...profile, autopilotMode },
           {
             onTextChunk: (chunk) => {
-              appendStreamChunk(chunk);
+              setStreamingText((prev) => (prev ?? "") + chunk);
             },
             onToolCallStart: (name) => {
               setToolName(name);
@@ -625,7 +880,7 @@ export default function App({
 
         setChatMessages(updatedChat);
         setCoreMessages(updatedCore);
-        clearStream();
+        setStreamingText(undefined);
 
         // Persist session to disk
         saveSession({
@@ -651,13 +906,13 @@ export default function App({
           { role: "assistant", content: `Error: ${message}${debugInfo}` },
         ]);
         setCoreMessages(newCoreMessages);
-        clearStream();
+        setStreamingText(undefined);
       } finally {
         setIsLoading(false);
         setToolName(undefined);
       }
     },
-    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry, pluginMap, hasAutopilot, hasJourneyStages, exit, debug, appendStreamChunk, clearStream, runAutopilotTurn],
+    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry, pluginMap, hasAutopilot, hasJourneyStages, exit, debug, runAutopilotTurn, awaitingApiKey],
   );
   // Keep ref in sync so the autopilot timer always has the latest sendMessage
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
@@ -673,13 +928,13 @@ export default function App({
     <Box flexDirection="column" width="100%" height="100%">
       <Box flexDirection="column" flexGrow={1} flexShrink={1}>
         <ChatView messages={chatMessages} streamingText={streamingText} />
+        {validatingKey && <Spinner label="Validating API key..." />}
+        {isLoading && toolName && <Spinner label={`Calling ${toolName}...`} />}
+        {isLoading && !toolName && <Spinner label={streamingText ? "Thinking..." : undefined} />}
       </Box>
 
-      {isLoading && toolName && <Spinner label={`Calling ${toolName}...`} />}
-      {isLoading && !toolName && <Spinner label={streamingText ? "Thinking..." : undefined} />}
-
       <Box flexShrink={0} width="100%">
-        <Input isActive={!isLoading} onSubmit={handleSubmit} />
+        <Input isActive={!isLoading && !validatingKey} onSubmit={handleSubmit} />
       </Box>
 
       <Box flexShrink={0} width="100%">
@@ -695,10 +950,10 @@ export default function App({
         />
       </Box>
 
-      <Box flexShrink={0} width="100%" paddingX={2} marginTop={1} justifyContent="space-between">
+      <Box flexShrink={0} width="100%" paddingX={2} marginTop={1} marginBottom={1} justifyContent="space-between">
         {hasJourneyStages ? (
           <>
-            <Text dimColor>/help · /portfolio · /market · /strategy · /exit</Text>
+            <Text dimColor>/help · /portfolio · /market · /model · /exit</Text>
             <Text dimColor>/auto on·off·set · Ctrl+C quit</Text>
           </>
         ) : (
@@ -716,4 +971,21 @@ export default function App({
 
 function formatTime(d: Date): string {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Map provider ID → friendly display name */
+function providerLabel(provider: string): string {
+  const labels: Record<string, string> = {
+    claude: "Claude", openai: "OpenAI GPT", google: "Gemini",
+    "openai-oauth": "Codex", ollama: "Ollama",
+  };
+  return labels[provider] ?? provider;
+}
+
+/** Map provider ID → short alias for display/comparison */
+function providerAlias(provider: string): string {
+  const aliases: Record<string, string> = {
+    claude: "claude", openai: "openai", google: "gemini", "openai-oauth": "codex",
+  };
+  return aliases[provider] ?? provider;
 }

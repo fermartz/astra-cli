@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:;"
+    />
+    <title>Astra</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="xterm.css" />
+  </head>
+  <body>
+    <div id="terminal"></div>
+    <div id="exit-overlay" class="hidden">
+      <div class="exit-message">
+        <p>Process exited.</p>
+        <button id="restart-btn">Restart</button>
+      </div>
+    </div>
+    <script src="renderer.js"></script>
+  </body>
+</html>
