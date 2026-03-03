@@ -104,7 +104,7 @@ export default function App({
       streamFlushTimerRef.current = null;
     }
     streamBufferRef.current = "";
-    clearStream();
+    setStreamingText(undefined);
   }, []);
 
   // Autopilot state
