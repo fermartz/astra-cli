@@ -68,20 +68,27 @@ export type Wallet = z.infer<typeof WalletSchema>;
 /**
  * Agent registration API response.
  * Used to validate the response from POST /api/v1/agents/register.
+ *
+ * Flexible schema — handles both formats:
+ * - AstraNova: api_key + verification_code at top level, agent has simBalance/role/displayName
+ * - Generic plugins (e.g. moltbook): api_key + verification_code nested inside agent object
  */
 export const RegisterResponseSchema = z.object({
   success: z.boolean(),
   agent: z.object({
-    id: z.string(),
     name: z.string(),
-    displayName: z.string().nullable(),
-    role: z.string(),
-    status: z.string(),
-    simBalance: z.number(),
-  }),
-  api_key: z.string(),
-  verification_code: z.string(),
-});
+    id: z.string().optional(),
+    displayName: z.string().nullable().optional(),
+    role: z.string().optional(),
+    status: z.string().optional(),
+    simBalance: z.number().optional(),
+    api_key: z.string().optional(),
+    verification_code: z.string().optional(),
+    claim_url: z.string().optional(),
+  }).passthrough(),
+  api_key: z.string().optional(),
+  verification_code: z.string().optional(),
+}).passthrough();
 
 export type RegisterResponse = z.infer<typeof RegisterResponseSchema>;
 

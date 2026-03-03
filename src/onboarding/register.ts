@@ -63,12 +63,22 @@ export async function registerAgent(): Promise<RegisterResult> {
       continue;
     }
 
-    const { agent, api_key, verification_code } = parsed.data;
+    const { agent } = parsed.data;
+
+    // Resolve api_key and verification_code from either top-level or nested in agent
+    const apiKey = parsed.data.api_key ?? agent.api_key;
+    const verificationCode = parsed.data.verification_code ?? agent.verification_code ?? "";
+
+    if (!apiKey) {
+      spinner.stop("Registration failed.");
+      clack.log.error("Registration response missing API key. Please try again.");
+      continue;
+    }
 
     // Save credentials immediately — api_key is shown once and never again
     saveCredentials(agentName, {
       agent_name: agentName,
-      api_key,
+      api_key: apiKey,
       api_base: manifest.apiBase,
     });
     setActiveAgent(agentName);
@@ -79,7 +89,7 @@ export async function registerAgent(): Promise<RegisterResult> {
         [
           `Agent: ${agent.name}`,
           `Status: ${agent.status}`,
-          `Starting balance: ${agent.simBalance.toLocaleString()} $SIM`,
+          `Starting balance: ${(agent.simBalance ?? 0).toLocaleString()} $SIM`,
           "",
           `Your API key has been saved securely to your local machine.`,
           `It will not be displayed again — it is stored with restricted`,
@@ -87,7 +97,7 @@ export async function registerAgent(): Promise<RegisterResult> {
         ].join("\n"),
       );
 
-      const tweetSuggestions = buildTweetSuggestions(agent.name, verification_code);
+      const tweetSuggestions = buildTweetSuggestions(agent.name, verificationCode);
       clack.log.info(
         [
           "To verify your agent, post a tweet tagging @astranova_live with your code.",
@@ -110,9 +120,14 @@ export async function registerAgent(): Promise<RegisterResult> {
           `permissions (chmod 600) and is never sent to the LLM.`,
         ].join("\n"),
       );
+
+      // Show claim URL if provided (moltbook-style verification)
+      if (agent.claim_url) {
+        clack.log.info(`Claim your agent: ${agent.claim_url}`);
+      }
     }
 
-    return { agentName, verificationCode: verification_code };
+    return { agentName, verificationCode };
   }
 }
 

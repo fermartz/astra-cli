@@ -37,7 +37,7 @@ export const registerAgentTool = tool({
     // Call the registration API (no auth needed)
     const result = await apiCall<{
       success?: boolean;
-      agent?: { name?: string; status?: string; simBalance?: number };
+      agent?: { name?: string; status?: string; simBalance?: number; api_key?: string; verification_code?: string };
       api_key?: string;
       verification_code?: string;
       error?: string;
@@ -55,7 +55,9 @@ export const registerAgentTool = tool({
 
     const data = result.data;
 
-    if (!data.api_key) {
+    // Resolve api_key from either top-level or nested in agent
+    const apiKey = data.api_key ?? data.agent?.api_key;
+    if (!apiKey) {
       return { error: "Registration response missing api_key. Something went wrong." };
     }
 
@@ -68,7 +70,7 @@ export const registerAgentTool = tool({
     // Save credentials
     saveCredentials(name, {
       agent_name: name,
-      api_key: data.api_key,
+      api_key: apiKey,
       api_base: getActiveManifest().apiBase,
     });
 
