@@ -60,6 +60,18 @@ jobs:
         run: node scripts/stage-native-modules.mjs
         working-directory: packages/desktop
 
+      # Verify node-pty is staged correctly before packaging
+      - name: Verify native modules
+        shell: bash
+        run: |
+          echo "=== node_modules/node-pty ==="
+          ls -la packages/desktop/node_modules/node-pty/ || echo "MISSING!"
+          echo "=== .node binaries ==="
+          find packages/desktop/node_modules/node-pty -name "*.node" 2>/dev/null || echo "No .node files!"
+          echo "=== prebuilds ==="
+          ls -la packages/desktop/node_modules/node-pty/prebuilds/ 2>/dev/null || echo "No prebuilds dir"
+          find packages/desktop/node_modules/node-pty/prebuilds -type f 2>/dev/null || echo "No prebuild files"
+
       # Build platform-specific installer
       - name: Make installer
         run: npx electron-forge make
