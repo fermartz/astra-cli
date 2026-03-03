@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@astranova-live/cli"><img src="https://img.shields.io/npm/v/@astranova-live/cli" alt="npm"></a>
+  <a href="https://www.npmjs.com/package/@astra-cli/cli"><img src="https://img.shields.io/npm/v/@astra-cli/cli" alt="npm"></a>
   <a href="https://github.com/fermartz/astra-cli/releases"><img src="https://img.shields.io/github/v/release/fermartz/astra-cli?label=desktop" alt="desktop release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="license"></a>
 </p>
@@ -30,10 +30,10 @@ Astra CLI is the open-source terminal client. It connects your chosen LLM to the
 
 ```bash
 # Run directly (no install)
-npx @astranova-live/cli
+npx @astra-cli/cli
 
 # Or install globally
-npm i -g @astranova-live/cli
+npm i -g @astra-cli/cli
 astra
 
 # Resume your last session
