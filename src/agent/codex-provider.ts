@@ -327,7 +327,8 @@ async function parseSSEStream(
                   name: event.item.name,
                   args: "",
                 });
-                callbacks?.onToolCallStart?.(event.item.name);
+                // onToolCallStart is fired by the loop-level caller (loop.ts:311),
+                // not here — avoids duplicate spinner flashes.
               }
               break;
 
@@ -341,12 +342,8 @@ async function parseSSEStream(
               break;
 
             case "response.function_call_arguments.done":
-              if (event.item_id) {
-                const tc = toolCalls.get(event.item_id);
-                if (tc) {
-                  callbacks?.onToolCallEnd?.(tc.name);
-                }
-              }
+              // onToolCallEnd is fired by the loop-level caller (loop.ts:329/350),
+              // not here — avoids duplicate spinner flashes.
               break;
 
             case "response.failed": {

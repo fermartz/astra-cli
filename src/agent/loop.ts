@@ -313,7 +313,11 @@ async function runResponsesApiTurn(
 
       try {
         debugLog(`Tool ${tc.name}(${tc.callId}) args: ${JSON.stringify(parsedArgs)}`);
-        const execute = (toolDef as unknown as { execute: (args: Record<string, unknown>, options: Record<string, unknown>) => Promise<unknown> }).execute;
+        const exec = (toolDef as Record<string, unknown>).execute;
+        if (typeof exec !== "function") {
+          throw new Error(`Tool "${tc.name}" has no execute method`);
+        }
+        const execute = exec as (args: Record<string, unknown>, options: Record<string, unknown>) => Promise<unknown>;
         const toolResult = await execute(parsedArgs, {});
         debugLog(`Tool ${tc.name}(${tc.callId}) result: ${JSON.stringify(toolResult).slice(0, 200)}`);
 
@@ -492,6 +496,12 @@ async function runSdkTurn(
       maxSteps: 10,
       temperature: 0.7,
       abortSignal: abortController.signal,
+      toolCallStreaming: true,
+      onChunk: ({ chunk }) => {
+        if (chunk.type === "tool-call-streaming-start") {
+          callbacks.onToolCallStart?.(chunk.toolName);
+        }
+      },
       onStepFinish: ({ toolCalls, toolResults }) => {
         resetIdleTimer();
         if (toolCalls && toolCalls.length > 0) {

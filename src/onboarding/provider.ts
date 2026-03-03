@@ -259,38 +259,48 @@ async function promptApiKey(provider: string): Promise<string> {
     google: "AIza...",
   };
 
-  const apiKey = await clack.text({
-    message: `Enter your ${labels[provider] ?? "API key"}`,
-    placeholder: placeholders[provider] ?? "your-api-key",
-    validate(value) {
-      if (!value || value.trim().length === 0) {
-        return "API key is required";
-      }
-      return undefined;
-    },
-  });
+  const maxAttempts = 5;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const apiKey = await clack.text({
+      message: `Enter your ${labels[provider] ?? "API key"}`,
+      placeholder: placeholders[provider] ?? "your-api-key",
+      validate(value) {
+        if (!value || value.trim().length === 0) {
+          return "API key is required";
+        }
+        return undefined;
+      },
+    });
 
-  if (clack.isCancel(apiKey)) {
-    clack.cancel("Setup cancelled.");
-    process.exit(0);
+    if (clack.isCancel(apiKey)) {
+      clack.cancel("Setup cancelled.");
+      process.exit(0);
+    }
+
+    const trimmed = (apiKey as string).trim();
+
+    // Validate with a test call
+    const spinner = clack.spinner();
+    spinner.start("Validating API key...");
+
+    const valid = await validateApiKey(provider, trimmed);
+
+    if (!valid.ok) {
+      spinner.stop(`API key validation failed: ${valid.error}`);
+      clack.log.error(
+        attempt < maxAttempts - 1
+          ? "Please check your key and try again."
+          : "Too many failed attempts. Please restart setup.",
+      );
+      continue;
+    }
+
+    spinner.stop("API key validated.");
+    return trimmed;
   }
 
-  const trimmed = (apiKey as string).trim();
-
-  // Validate with a test call
-  const spinner = clack.spinner();
-  spinner.start("Validating API key...");
-
-  const valid = await validateApiKey(provider, trimmed);
-
-  if (!valid.ok) {
-    spinner.stop(`API key validation failed: ${valid.error}`);
-    clack.log.error("Please check your key and try again.");
-    return promptApiKey(provider);
-  }
-
-  spinner.stop("API key validated.");
-  return trimmed;
+  clack.cancel("Too many failed API key attempts.");
+  process.exit(1);
 }
 
 interface ValidationResult {
