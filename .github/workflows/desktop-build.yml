@@ -12,12 +12,11 @@ permissions:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: macos-latest
             platform: macOS-arm64
-          - os: macos-13
-            platform: macOS-x64
           - os: ubuntu-latest
             platform: Linux
           - os: windows-latest
