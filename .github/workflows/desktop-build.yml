@@ -7,7 +7,7 @@ on:
       - "desktop-v*"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -66,26 +66,79 @@ jobs:
         run: npx electron-forge make
         working-directory: packages/desktop
 
-      # Upload artifacts
-      - name: Upload macOS DMG
-        if: runner.os == 'macOS'
+      # Upload artifacts (available from Actions tab)
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Astra-${{ matrix.platform }}
-          path: packages/desktop/out/make/**/*.dmg
+          path: packages/desktop/out/make/**/*
 
-      - name: Upload Linux packages
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Astra-${{ matrix.platform }}
-          path: |
-            packages/desktop/out/make/**/*.deb
-            packages/desktop/out/make/**/*.rpm
+      # Collect installer files for release upload
+      - name: Collect release files
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            cp packages/desktop/out/make/**/*.dmg release-assets/Astra-${{ matrix.platform }}.dmg 2>/dev/null || true
+          elif [ "$RUNNER_OS" == "Linux" ]; then
+            cp packages/desktop/out/make/deb/x64/*.deb release-assets/ 2>/dev/null || true
+            cp packages/desktop/out/make/rpm/x64/*.rpm release-assets/ 2>/dev/null || true
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            cp packages/desktop/out/make/squirrel.windows/x64/*.exe release-assets/ 2>/dev/null || true
+          fi
+          ls -la release-assets/
 
-      - name: Upload Windows installer
-        if: runner.os == 'Windows'
+      # Upload release files as artifact for the release job
+      - name: Upload release assets
         uses: actions/upload-artifact@v4
         with:
-          name: Astra-${{ matrix.platform }}
-          path: packages/desktop/out/make/**/*.exe
+          name: release-${{ matrix.platform }}
+          path: release-assets/*
+
+  # Create GitHub Release with all platform installers attached
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+
+    steps:
+      - name: Download all release assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: assets
+
+      - name: List assets
+        run: ls -la assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Astra Desktop ${{ github.ref_name }}"
+          body: |
+            ## Download
+
+            | Platform | File | Notes |
+            |----------|------|-------|
+            | macOS (Apple Silicon) | `Astra-macOS-arm64.dmg` | M1/M2/M3/M4 |
+            | macOS (Intel) | `Astra-macOS-x64.dmg` | Older Macs |
+            | Linux (Debian/Ubuntu) | `.deb` | `sudo dpkg -i <file>.deb` |
+            | Linux (Fedora/RHEL) | `.rpm` | `sudo rpm -i <file>.rpm` |
+            | Windows | `.exe` | Squirrel installer |
+
+            ### macOS — first launch
+
+            The app is not code-signed. After downloading, run once:
+            ```bash
+            xattr -cr /Applications/Astra.app
+            ```
+
+            ### CLI (terminal only)
+
+            ```bash
+            npx @astranova-live/cli
+            ```
+          files: assets/*
+          draft: false
+          prerelease: false
