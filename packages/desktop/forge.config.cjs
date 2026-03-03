@@ -1,5 +1,11 @@
 /** @type {import('@electron-forge/shared-types').ForgeConfig} */
 module.exports = {
+  plugins: [
+    {
+      name: "@electron-forge/plugin-auto-unpack-natives",
+      config: {},
+    },
+  ],
   packagerConfig: {
     name: "Astra",
     executableName: "astra",
