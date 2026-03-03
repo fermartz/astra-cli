@@ -1,7 +1,8 @@
 import { build } from "esbuild";
-import { cpSync } from "fs";
+import { cpSync, realpathSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -27,9 +28,11 @@ cpSync(
   resolve(__dirname, "dist/renderer/styles.css"),
 );
 
-// Copy xterm.css
+// Copy xterm.css — resolve through pnpm symlinks
+const require = createRequire(import.meta.url);
+const xtermPkg = dirname(require.resolve("@xterm/xterm/package.json"));
 cpSync(
-  resolve(__dirname, "node_modules/@xterm/xterm/css/xterm.css"),
+  resolve(xtermPkg, "css/xterm.css"),
   resolve(__dirname, "dist/renderer/xterm.css"),
 );
 
