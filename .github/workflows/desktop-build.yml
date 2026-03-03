@@ -78,7 +78,7 @@ jobs:
         run: |
           mkdir -p release-assets
           if [ "$RUNNER_OS" == "macOS" ]; then
-            cp packages/desktop/out/make/**/*.dmg release-assets/Astra-${{ matrix.platform }}.dmg 2>/dev/null || true
+            find packages/desktop/out/make -name '*.dmg' -exec cp {} release-assets/Astra-${{ matrix.platform }}.dmg \; 2>/dev/null || true
           elif [ "$RUNNER_OS" == "Linux" ]; then
             cp packages/desktop/out/make/deb/x64/*.deb release-assets/ 2>/dev/null || true
             cp packages/desktop/out/make/rpm/x64/*.rpm release-assets/ 2>/dev/null || true
@@ -136,7 +136,7 @@ jobs:
             ### CLI (terminal only)
 
             ```bash
-            npx @astranova-live/cli
+            npx @astra-cli/cli
             ```
           files: assets/*
           draft: false
