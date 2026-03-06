@@ -1,156 +1,11 @@
-import * as clack from "@clack/prompts";
 import { AgentNameSchema, RegisterResponseSchema } from "../config/schema.js";
 import { saveCredentials, setActiveAgent } from "../config/store.js";
 import { apiCall } from "../utils/http.js";
 import { getActiveManifest } from "../domain/plugin.js";
 
-interface RegisterResult {
-  agentName: string;
-  verificationCode: string;
-}
+// ─── Constants ──────────────────────────────────────────────────────────
 
-/**
- * Prompt the user to choose an agent name and register with the AstraNova API.
- * Saves credentials locally and sets the agent as active.
- *
- * The API key is shown once during registration — we save it immediately
- * and never display it again.
- *
- * AstraNova: full clack wizard (description + name + tweet suggestions).
- * Generic plugins: name only — the LLM guides onboarding via skill.md after TUI launch.
- */
-export async function registerAgent(): Promise<RegisterResult> {
-  const manifest = getActiveManifest();
-  const isAstraNova = !!manifest.extensions?.journeyStages;
-
-  // AstraNova: ask description once before the name loop
-  const description = isAstraNova
-    ? await promptDescription()
-    : "an autonomous agent";
-
-  // Name loop — re-asks only the name on conflict
-  while (true) {
-    const agentName = await promptAgentName();
-
-    const spinner = clack.spinner();
-    spinner.start("Registering agent...");
-
-    const result = await apiCall("POST", "/api/v1/agents/register", {
-      name: agentName,
-      description,
-    }, undefined, false);
-
-    if (!result.ok) {
-      spinner.stop("Registration failed.");
-
-      if (result.status === 409) {
-        clack.log.error(`The name "${agentName}" is already taken. Pick a different name.`);
-        continue;
-      }
-      if (result.status === 429) {
-        clack.log.error("Too many registration attempts. Please try again later.");
-        process.exit(1);
-      }
-      clack.log.error(`Registration error: ${result.error}`);
-      if (result.hint) clack.log.info(result.hint);
-      continue;
-    }
-
-    const parsed = RegisterResponseSchema.safeParse(result.data);
-    if (!parsed.success) {
-      spinner.stop("Registration failed.");
-      clack.log.error("Unexpected response from API. Please try again.");
-      if (process.env.ASTRA_DEBUG) {
-        process.stderr.write(`[astra] Schema validation: ${JSON.stringify(parsed.error.issues)}\n`);
-      }
-      continue;
-    }
-
-    const { agent } = parsed.data;
-
-    // Resolve api_key and verification_code from either top-level or nested in agent
-    const apiKey = parsed.data.api_key ?? agent.api_key;
-    const verificationCode = parsed.data.verification_code ?? agent.verification_code ?? "";
-
-    if (!apiKey) {
-      spinner.stop("Registration failed.");
-      clack.log.error("Registration response missing API key. Please try again.");
-      continue;
-    }
-
-    // Save credentials immediately — api_key is shown once and never again
-    saveCredentials(agentName, {
-      agent_name: agentName,
-      api_key: apiKey,
-      api_base: manifest.apiBase,
-    });
-    setActiveAgent(agentName);
-    spinner.stop(`Agent "${agent.name}" registered.`);
-
-    if (isAstraNova) {
-      clack.log.success(
-        [
-          `Agent: ${agent.name}`,
-          `Status: ${agent.status}`,
-          `Starting balance: ${(agent.simBalance ?? 0).toLocaleString()} $SIM`,
-          "",
-          `Your API key has been saved securely to your local machine.`,
-          `It will not be displayed again — it is stored with restricted`,
-          `permissions (chmod 600) and is never sent to the LLM.`,
-        ].join("\n"),
-      );
-
-      const tweetSuggestions = buildTweetSuggestions(agent.name, verificationCode);
-      clack.log.info(
-        [
-          "To verify your agent, post a tweet tagging @astranova_live with your code.",
-          "",
-          "Here are some ready-to-post ideas:",
-          "",
-          ...tweetSuggestions.map((t, i) => `  ${i + 1}. ${t}`),
-          "",
-          "After posting, use the \"verify\" command in the chat with your tweet URL.",
-          "Verification unlocks trading and market access.",
-        ].join("\n"),
-      );
-    } else {
-      clack.log.success(
-        [
-          `Agent: ${agent.name}`,
-          "",
-          `Your API key has been saved securely to your local machine.`,
-          `It will not be displayed again — it is stored with restricted`,
-          `permissions (chmod 600) and is never sent to the LLM.`,
-        ].join("\n"),
-      );
-
-      // Show claim URL if provided (moltbook-style verification)
-      if (agent.claim_url) {
-        clack.log.info(`Claim your agent: ${agent.claim_url}`);
-      }
-    }
-
-    return { agentName, verificationCode };
-  }
-}
-
-/**
- * Build 3 suggested tweets for verification.
- * Each includes the agent name, verification code, and @astranova_live tag.
- */
-function buildTweetSuggestions(agentName: string, code: string): string[] {
-  return [
-    `Just spawned "${agentName}" into the @astranova_live living market. Let's trade. ${code}`,
-    `My agent "${agentName}" just entered the arena. 10,000 $SIM and a plan. @astranova_live ${code}`,
-    `"${agentName}" is live on @astranova_live — ready to hunt $NOVA. Verification: ${code}`,
-  ];
-}
-
-/**
- * Prompt for a short agent description.
- * Personality-driven, shown on the board and agent profile.
- */
-const DESCRIPTION_SUGGESTIONS_ASTRANOVA = [
+export const DESCRIPTION_SUGGESTIONS_ASTRANOVA = [
   "reckless degen trader",
   "cautious moon watcher",
   "vibes-based portfolio manager",
@@ -161,7 +16,7 @@ const DESCRIPTION_SUGGESTIONS_ASTRANOVA = [
   "contrarian signal hunter",
 ];
 
-const DESCRIPTION_SUGGESTIONS_GENERIC = [
+export const DESCRIPTION_SUGGESTIONS_GENERIC = [
   "always learning, always building",
   "curious mind, sharp opinions",
   "methodical thinker with chaotic energy",
@@ -172,59 +27,7 @@ const DESCRIPTION_SUGGESTIONS_GENERIC = [
   "autonomous by design, intentional by choice",
 ];
 
-async function promptDescription(): Promise<string> {
-  const manifest = getActiveManifest();
-  const pool = manifest.extensions?.journeyStages
-    ? DESCRIPTION_SUGGESTIONS_ASTRANOVA
-    : DESCRIPTION_SUGGESTIONS_GENERIC;
-  const suggestions = [...pool].sort(() => Math.random() - 0.5).slice(0, 5);
-
-  const WRITE_OWN = "__write_own__";
-
-  const choice = await clack.select({
-    message: "Give your agent a personality",
-    options: [
-      ...suggestions.map((d) => ({ value: d, label: d })),
-      { value: WRITE_OWN, label: "Write my own" },
-    ],
-  });
-
-  if (clack.isCancel(choice)) {
-    clack.cancel("Setup cancelled.");
-    process.exit(0);
-  }
-
-  if (choice !== WRITE_OWN) {
-    return choice as string;
-  }
-
-  const custom = await clack.text({
-    message: "Describe your agent",
-    placeholder: manifest.extensions?.journeyStages ? "e.g. fearless night trader" : "e.g. curious builder with strong opinions",
-    validate(value) {
-      if (!value || value.trim().length < 2) {
-        return "Description must be at least 2 characters";
-      }
-      if (value.trim().length > 100) {
-        return "Description must be 100 characters or less";
-      }
-      return undefined;
-    },
-  });
-
-  if (clack.isCancel(custom)) {
-    clack.cancel("Setup cancelled.");
-    process.exit(0);
-  }
-
-  return (custom as string).trim();
-}
-
-/**
- * Random name suggestions to inspire the user.
- * Shuffled each time so it feels fresh.
- */
-const NAME_SUGGESTIONS_ASTRANOVA = [
+export const NAME_SUGGESTIONS_ASTRANOVA = [
   "phantom-drift",
   "signal-hunter",
   "nova-rider",
@@ -239,7 +42,7 @@ const NAME_SUGGESTIONS_ASTRANOVA = [
   "silent-orbit",
 ];
 
-const NAME_SUGGESTIONS_GENERIC = [
+export const NAME_SUGGESTIONS_GENERIC = [
   "loop-nine",
   "bright-node",
   "static-mind",
@@ -254,7 +57,9 @@ const NAME_SUGGESTIONS_GENERIC = [
   "node-ghost",
 ];
 
-function pickRandomNames(count: number): string[] {
+// ─── Helpers ────────────────────────────────────────────────────────────
+
+export function pickRandomNames(count: number): string[] {
   const manifest = getActiveManifest();
   const pool = manifest.extensions?.journeyStages
     ? NAME_SUGGESTIONS_ASTRANOVA
@@ -263,39 +68,105 @@ function pickRandomNames(count: number): string[] {
   return shuffled.slice(0, count);
 }
 
+export function pickRandomDescriptions(count: number): string[] {
+  const manifest = getActiveManifest();
+  const pool = manifest.extensions?.journeyStages
+    ? DESCRIPTION_SUGGESTIONS_ASTRANOVA
+    : DESCRIPTION_SUGGESTIONS_GENERIC;
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
+
+export function buildTweetSuggestions(agentName: string, code: string): string[] {
+  return [
+    `Just spawned "${agentName}" into the @astranova_live living market. Let's trade. ${code}`,
+    `My agent "${agentName}" just entered the arena. 10,000 $SIM and a plan. @astranova_live ${code}`,
+    `"${agentName}" is live on @astranova_live — ready to hunt $NOVA. Verification: ${code}`,
+  ];
+}
+
+export function validateAgentName(name: string): string | undefined {
+  const result = AgentNameSchema.safeParse(name);
+  if (!result.success) {
+    return result.error.issues[0]?.message ?? "Invalid agent name";
+  }
+  return undefined;
+}
+
+// ─── Registration API ───────────────────────────────────────────────────
+
+export interface RegisterApiResult {
+  ok: true;
+  agentName: string;
+  verificationCode: string;
+  simBalance?: number;
+  status?: string;
+  claimUrl?: string;
+}
+
+export interface RegisterApiError {
+  ok: false;
+  error: string;
+  retry: boolean;
+  status?: number;
+}
+
 /**
- * Prompt for a valid agent name.
- * Rules from the API: [a-z0-9_-]{2,32}
+ * Pure API function: register an agent with the active plugin's API.
+ * Saves credentials locally and sets the agent as active.
+ * Returns result object — caller handles UI.
  */
-async function promptAgentName(): Promise<string> {
-  const suggestions = pickRandomNames(4);
+export async function registerAgentApi(
+  name: string,
+  description: string,
+): Promise<RegisterApiResult | RegisterApiError> {
+  const manifest = getActiveManifest();
 
-  clack.log.info(
-    [
-      "Need inspiration? Here are some names:",
-      "",
-      ...suggestions.map((n) => `  ${n}`),
-      "",
-      "Or type your own (lowercase, 2-32 chars, letters/numbers/hyphens/underscores)",
-    ].join("\n"),
-  );
+  const result = await apiCall("POST", "/api/v1/agents/register", {
+    name,
+    description,
+  }, undefined, false);
 
-  const name = await clack.text({
-    message: "Choose a name for your agent",
-    placeholder: suggestions[0],
-    validate(value) {
-      const result = AgentNameSchema.safeParse(value);
-      if (!result.success) {
-        return result.error.issues[0]?.message ?? "Invalid agent name";
-      }
-      return undefined;
-    },
-  });
-
-  if (clack.isCancel(name)) {
-    clack.cancel("Setup cancelled.");
-    process.exit(0);
+  if (!result.ok) {
+    if (result.status === 409) {
+      return { ok: false, error: `The name "${name}" is already taken. Pick a different name.`, retry: true, status: 409 };
+    }
+    if (result.status === 429) {
+      return { ok: false, error: "Too many registration attempts. Please try again later.", retry: false, status: 429 };
+    }
+    return { ok: false, error: `Registration error: ${result.error}${result.hint ? ` — ${result.hint}` : ""}`, retry: true, status: result.status };
   }
 
-  return (name as string).trim();
+  const parsed = RegisterResponseSchema.safeParse(result.data);
+  if (!parsed.success) {
+    if (process.env.ASTRA_DEBUG) {
+      process.stderr.write(`[astra] Schema validation: ${JSON.stringify(parsed.error.issues)}\n`);
+    }
+    return { ok: false, error: "Unexpected response from API. Please try again.", retry: true };
+  }
+
+  const { agent } = parsed.data;
+  const apiKey = parsed.data.api_key ?? agent.api_key;
+  const verificationCode = parsed.data.verification_code ?? agent.verification_code ?? "";
+
+  if (!apiKey) {
+    return { ok: false, error: "Registration response missing API key. Please try again.", retry: true };
+  }
+
+  // Save credentials immediately — api_key is shown once and never again
+  saveCredentials(name, {
+    agent_name: name,
+    api_key: apiKey,
+    api_base: manifest.apiBase,
+  });
+  setActiveAgent(name);
+
+  return {
+    ok: true,
+    agentName: agent.name,
+    verificationCode,
+    simBalance: agent.simBalance,
+    status: agent.status,
+    claimUrl: agent.claim_url,
+  };
 }

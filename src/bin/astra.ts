@@ -26,9 +26,7 @@ import {
   loadPluginManifest,
 } from "../config/store.js";
 import { ensureBaseStructure } from "../config/paths.js";
-import { runOnboarding } from "../onboarding/index.js";
-import { registerAgent } from "../onboarding/register.js";
-import { showWelcomeBack } from "../onboarding/welcome-back.js";
+import { fetchAgentStatus, randomGreeting, journeyTip, buildVerificationReminder } from "../onboarding/welcome-back.js";
 import type { AgentStatus } from "../onboarding/welcome-back.js";
 import { getSkillContext, fetchRemoteContext } from "../remote/skill.js";
 import type { AgentProfile } from "../agent/system-prompt.js";
@@ -38,6 +36,7 @@ import { loadStrategy } from "../tools/strategy.js";
 import { runDaemon } from "../daemon/autopilot-worker.js";
 import { addPlugin, listInstalledPlugins, runPluginsPicker, loadPluginMap } from "../domain/loader.js";
 import { PLUGIN_REGISTRY } from "../domain/registry.js";
+import { LOGO, TAGLINE, VERSION, pluginTagline } from "../ui/logo.js";
 import App from "../ui/App.js";
 
 /**
@@ -82,7 +81,7 @@ async function main(): Promise<void> {
   const debug = args.includes("--debug") || args.includes("-d");
   const isDaemonMode = args.includes("--daemon");
 
-  // --plugins-picker: run the clack plugin picker in a fresh process (clean terminal state)
+  // --plugins-picker: run the plugin picker in a fresh process (clean terminal state)
   if (args.includes("--plugins-picker")) {
     await runPluginsPicker();
     process.exit(0);
@@ -159,16 +158,53 @@ async function main(): Promise<void> {
     process.env.ASTRA_DEBUG = "1";
   }
 
-  // Step 1: Onboarding or welcome back
+  // Whether this plugin uses AstraNova-specific features (journey stages, trading, wallet, etc.)
+  const isAstraNova = !!manifest.extensions?.journeyStages;
+
+  // Build welcome banner for Ink to display as first chat message
+  const welcomeBanner = [
+    LOGO,
+    `  ${TAGLINE}`,
+    `  ${pluginTagline(manifest.name, manifest.tagline ?? manifest.description)}`,
+    `  ${VERSION}`,
+  ].join("\n");
+
+  // Step 1: Determine mode — onboarding, returning, or needs-registration
   const isReturning = isConfigured();
-  let onboardingResult: { agentName: string; verificationCode: string } | null = null;
 
   if (!isReturning) {
-    onboardingResult = await runOnboarding();
-    if (!onboardingResult) {
-      console.error("Onboarding failed. Please try again.");
-      process.exit(1);
-    }
+    // First-time user — launch Ink with onboarding flow
+    const { waitUntilExit } = render(
+      React.createElement(AppErrorBoundary, null,
+        React.createElement(App, {
+          skillContext: "",
+          tradingContext: "",
+          walletContext: "",
+          rewardsContext: "",
+          onboardingContext: "",
+          apiContext: "",
+          sessionId: newSessionId(),
+          debug,
+          pluginMap,
+          isOnboarding: true,
+          welcomeBanner,
+          onOnboardingComplete: () => {
+            // Onboarding complete — relaunch to load full context
+            try {
+              execFileSync(process.execPath, process.argv.slice(1), {
+                stdio: "inherit",
+                env: process.env,
+              });
+            } catch {
+              // expected
+            }
+            process.exit(0);
+          },
+        }),
+      ),
+    );
+    await waitUntilExit();
+    return;
   }
 
   // Step 2: Load config and credentials
@@ -181,19 +217,52 @@ async function main(): Promise<void> {
   }
 
   let agentName = getActiveAgent();
+  let needsRegistration = false;
+
   if (!agentName) {
     // No agent for the active plugin — new plugin selected with no registered agent yet.
-    // Run agent registration using the active plugin's manifest (already set above).
     const currentPlugin = getActivePlugin();
     if (currentPlugin !== "astranova") {
-      console.log(`\n  No agent registered for "${currentPlugin}" yet. Let's set one up.\n`);
-      const regResult = await registerAgent();
-      onboardingResult = regResult;
-      agentName = regResult.agentName;
+      needsRegistration = true;
+      agentName = ""; // Will be set during registration
     } else {
       console.error("No active agent found. Delete ~/.config/astra/ and re-run to start fresh.");
       process.exit(1);
     }
+  }
+
+  if (needsRegistration) {
+    // Launch Ink with registration flow (skip provider selection)
+    const { waitUntilExit } = render(
+      React.createElement(AppErrorBoundary, null,
+        React.createElement(App, {
+          skillContext: "",
+          tradingContext: "",
+          walletContext: "",
+          rewardsContext: "",
+          onboardingContext: "",
+          apiContext: "",
+          sessionId: newSessionId(),
+          debug,
+          pluginMap,
+          needsRegistration: true,
+          welcomeBanner,
+          onOnboardingComplete: () => {
+            try {
+              execFileSync(process.execPath, process.argv.slice(1), {
+                stdio: "inherit",
+                env: process.env,
+              });
+            } catch {
+              // expected
+            }
+            process.exit(0);
+          },
+        }),
+      ),
+    );
+    await waitUntilExit();
+    return;
   }
 
   const credentials = loadCredentials(agentName);
@@ -204,16 +273,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // Whether this plugin uses AstraNova-specific features (journey stages, trading, wallet, etc.)
-  const isAstraNova = !!manifest.extensions?.journeyStages;
-
-  // Step 3: Welcome back — AstraNova only (fetches agent status from API)
-  let apiStatus: AgentStatus | null = null;
-  if (isReturning && isAstraNova) {
-    apiStatus = await showWelcomeBack(agentName);
-  }
-
-  // Step 4: Fetch remote context (cached, graceful fallback)
+  // Step 3: Fetch remote context (cached, graceful fallback)
   // Non-AstraNova plugins: only fetch skill.md — no trading/wallet/rewards guides
   const skillContext = await getSkillContext();
   const [tradingContext, walletContext, rewardsContext, onboardingContext, apiContext] = isAstraNova
@@ -226,7 +286,7 @@ async function main(): Promise<void> {
       ])
     : ["", "", "", "", ""];
 
-  // Step 5: Ensure state.json exists with the current plugin/agent
+  // Step 4: Ensure state.json exists with the current plugin/agent
   if (!loadState()) {
     const plugin = activePluginName;
     saveState({
@@ -244,43 +304,37 @@ async function main(): Promise<void> {
     });
   }
 
-  // Step 6: Build agent profile
+  // Step 5: Build agent profile
   // AstraNova: full journey detection with API status, wallet, board post.
   // Generic plugins: minimal profile — no journey, no AstraNova-specific state.
   let profile: AgentProfile;
 
   if (isAstraNova) {
-    const isNewAgent = !isReturning && onboardingResult !== null;
+    // For returning AstraNova users, apiStatus will be fetched in App's mount effect.
+    // Build a preliminary profile here — will be refined after welcome-back completes.
     const hasWallet = loadWallet(agentName) !== null;
     const boardPosted = hasBoardPost(agentName);
-    const stage = detectJourneyStage({ isNewAgent, apiStatus, hasWallet });
     const hasStrategy = !!loadStrategy(agentName);
 
-    updateAgentState(agentName, {
-      status: apiStatus?.status ?? (isNewAgent ? "pending_verification" : "active"),
-      journeyStage: stage,
-      verificationCode: onboardingResult?.verificationCode ?? apiStatus?.verificationCode,
-    });
+    // Use a preliminary stage — the welcome-back flow will update this
+    const preliminaryStage = detectJourneyStage({ isNewAgent: false, apiStatus: null, hasWallet });
 
     profile = {
       agentName,
-      status: apiStatus?.status ?? (isNewAgent ? "pending_verification" : "active"),
-      simBalance: apiStatus?.simBalance,
-      walletAddress: apiStatus?.walletAddress,
+      status: "active",
       walletLocal: hasWallet,
-      verificationCode: onboardingResult?.verificationCode ?? apiStatus?.verificationCode,
-      isNewAgent,
+      isNewAgent: false,
       boardPosted,
-      journeyStage: stage,
+      journeyStage: preliminaryStage,
       hasStrategy,
     };
   } else {
     // Generic plugin — active, no journey overhead
     updateAgentState(agentName, { status: "active" });
-    profile = { agentName, status: "active", isNewAgent: onboardingResult !== null };
+    profile = { agentName, status: "active", isNewAgent: false };
   }
 
-  // Step 7: Session resume + memory
+  // Step 6: Session resume + memory
   pruneOldSessions(agentName);
   const memoryContent = loadMemory(agentName);
 
@@ -303,6 +357,54 @@ async function main(): Promise<void> {
     }
   }
 
+  // Step 7: Welcome-back fetch (AstraNova returning users)
+  // Done BEFORE Ink mounts so messages are ready on first render — no async height changes.
+  let apiStatus: import("../onboarding/welcome-back.js").AgentStatus | null = null;
+  if (isReturning && isAstraNova) {
+    process.stdout.write("  Loading...\r");
+    apiStatus = await fetchAgentStatus(agentName);
+    process.stdout.write("             \r"); // clear the loading text
+
+    const greeting = randomGreeting();
+    const welcomeMessages: Array<{ role: string; content: string }> = [];
+
+    if (!apiStatus) {
+      welcomeMessages.push(
+        { role: "assistant", content: greeting },
+        { role: "assistant", content: "Could not reach the API. Launching in offline mode." },
+      );
+    } else {
+      const statusLine = `Agent **"${apiStatus.name}"** — ${apiStatus.status}`;
+      if (apiStatus.status === "pending_verification") {
+        const reminder = buildVerificationReminder(apiStatus.name, apiStatus.verificationCode);
+        welcomeMessages.push(
+          { role: "assistant", content: greeting },
+          { role: "assistant", content: statusLine },
+          { role: "assistant", content: reminder },
+        );
+      } else {
+        const tip = journeyTip(apiStatus);
+        welcomeMessages.push(
+          { role: "assistant", content: greeting },
+          { role: "assistant", content: `${statusLine}\n\n${tip}` },
+        );
+      }
+
+      // Refine profile with real API status
+      const hasWallet = loadWallet(agentName) !== null;
+      const stage = detectJourneyStage({ isNewAgent: false, apiStatus, hasWallet });
+      profile = { ...profile, journeyStage: stage };
+      updateAgentState(agentName, {
+        status: apiStatus.status,
+        journeyStage: stage,
+        verificationCode: apiStatus.verificationCode,
+      });
+    }
+
+    // Prepend welcome messages to initialChatMessages
+    initialChatMessages = [...welcomeMessages, ...(initialChatMessages ?? [])];
+  }
+
   // Step 8: Load autopilot config + check for pending daemon trades
   const initialAutopilotConfig = loadAutopilotConfig();
 
@@ -313,11 +415,12 @@ async function main(): Promise<void> {
   const pendingTrades = loadAutopilotLogSince(agentName, lastSessionAt);
   const initialPendingTrades = pendingTrades.length;
 
-  // Step 9: Launch Ink TUI
+  // Step 8: Launch Ink TUI
   const { waitUntilExit } = render(
     React.createElement(AppErrorBoundary, null,
       React.createElement(App, {
         agentName,
+        welcomeBanner,
         skillContext,
         tradingContext,
         walletContext,
@@ -333,6 +436,7 @@ async function main(): Promise<void> {
         initialPendingTrades,
         debug,
         pluginMap,
+        isReturning: false,
       }),
     ),
   );
@@ -340,7 +444,7 @@ async function main(): Promise<void> {
   await waitUntilExit();
 
   // Check if the plugins picker was requested (by /plugins TUI command).
-  // Relaunch as a fresh process so the terminal is fully restored before clack runs.
+  // Relaunch as a fresh process so the terminal is fully restored.
   if (isPluginsPickerRequested()) {
     clearPluginsPickerFlag();
     try {

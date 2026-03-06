@@ -3,11 +3,13 @@ import { Box, Text, useApp, useInput } from "ink";
 import type { CoreMessage } from "ai";
 import StatusBar from "./StatusBar.js";
 import ChatView, { type ChatMessage } from "./ChatView.js";
+import MarkdownText from "./MarkdownText.js";
+import ErrorBoundary from "./ErrorBoundary.js";
 import Input from "./Input.js";
 import Spinner from "./Spinner.js";
 import { runAgentTurn } from "../agent/loop.js";
 import { isRestartRequested, loadConfig, saveConfig, saveAutopilotConfig, loadEpochBudget, saveEpochBudget, appendAutopilotLog, loadAutopilotLogSince, requestPluginsPicker } from "../config/store.js";
-import { validateApiKey, DEFAULT_MODELS, openBrowser } from "../onboarding/provider.js";
+import { validateApiKey, DEFAULT_MODELS, openBrowser, PROVIDER_OPTIONS, API_KEY_LABELS, API_KEY_PLACEHOLDERS } from "../onboarding/provider.js";
 import {
   generatePkce,
   generateState,
@@ -17,6 +19,8 @@ import {
   REDIRECT_URI,
 } from "../onboarding/oauth.js";
 import { waitForCallback } from "../onboarding/callback-server.js";
+import { registerAgentApi, pickRandomNames, pickRandomDescriptions, validateAgentName } from "../onboarding/register.js";
+import type { AgentStatus } from "../onboarding/welcome-back.js";
 import { saveSession } from "../config/sessions.js";
 import type { AgentProfile } from "../agent/system-prompt.js";
 import type { Config } from "../config/schema.js";
@@ -35,15 +39,29 @@ import { getActiveManifest } from "../domain/plugin.js";
 import type { PluginMap } from "../domain/loader.js";
 
 
+// ─── Onboarding Phase State Machine ─────────────────────────────────────
+
+type OnboardingPhase =
+  | null               // not onboarding
+  | "provider"         // choose LLM provider (1-4)
+  | "api-key"          // paste API key
+  | "api-key-validating" // validating key
+  | "oauth-waiting"    // waiting for OAuth callback
+  | "description"      // pick agent personality
+  | "agent-name"       // enter agent name
+  | "registering"      // API call in progress
+  | "complete";        // done
+
+
 interface AppProps {
-  agentName: string;
+  agentName?: string;
   skillContext: string;
   tradingContext: string;
   walletContext: string;
   rewardsContext: string;
   onboardingContext: string;
   apiContext: string;
-  profile: AgentProfile;
+  profile?: AgentProfile;
   sessionId: string;
   memoryContent?: string;
   initialCoreMessages?: CoreMessage[];
@@ -53,17 +71,26 @@ interface AppProps {
   initialPendingTrades?: number;
   debug?: boolean;
   pluginMap?: PluginMap | null;
+  welcomeBanner?: string;
+  isOnboarding?: boolean;
+  needsRegistration?: boolean;
+  isReturning?: boolean;
+  onOnboardingComplete?: (result: {
+    agentName: string;
+    verificationCode: string;
+    apiStatus: AgentStatus | null;
+  }) => void;
 }
 
 export default function App({
-  agentName,
+  agentName: agentNameProp,
   skillContext,
   tradingContext,
   walletContext,
   rewardsContext,
   onboardingContext,
   apiContext,
-  profile,
+  profile: profileProp,
   sessionId,
   memoryContent,
   initialCoreMessages,
@@ -72,18 +99,37 @@ export default function App({
   initialPendingTrades = 0,
   debug,
   pluginMap,
+  welcomeBanner,
+  isOnboarding,
+  needsRegistration,
+  isReturning,
+  onOnboardingComplete,
 }: AppProps): React.JSX.Element {
   const { exit } = useApp();
+
+  // Default agentName and profile for onboarding (not known yet)
+  const agentName = agentNameProp ?? "";
+  const profile = profileProp ?? { agentName: "", status: "active", isNewAgent: true };
 
   // Plugin manifest — stable for the lifetime of this session
   const manifest = getActiveManifest();
   const hasAutopilot = manifest.extensions?.autopilot === true;
   const hasJourneyStages = manifest.extensions?.journeyStages === true;
 
-  // Chat state
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(
-    (initialChatMessages as ChatMessage[]) ?? [],
+  // Onboarding state machine
+  const [onboardingPhase, setOnboardingPhase] = useState<OnboardingPhase>(
+    isOnboarding ? "provider" : needsRegistration ? "description" : null,
   );
+  const onboardingDataRef = useRef<Record<string, unknown>>({});
+
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
+    const initial = (initialChatMessages as ChatMessage[]) ?? [];
+    if (welcomeBanner) {
+      return [{ role: "log" as const, content: welcomeBanner }, ...initial];
+    }
+    return initial;
+  });
   const [coreMessages, setCoreMessages] = useState<CoreMessage[]>(
     initialCoreMessages ?? [],
   );
@@ -110,6 +156,7 @@ export default function App({
 
   // Load persisted epoch budget on mount
   useEffect(() => {
+    if (!agentName) return;
     const saved = loadEpochBudget(agentName);
     if (saved) {
       epochIdRef.current = saved.epochId;
@@ -131,6 +178,57 @@ export default function App({
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // mount only
+
+  // Show onboarding provider selection on mount
+  useEffect(() => {
+    if (onboardingPhase !== "provider") return;
+    const lines = [
+      "Choose your LLM provider:\n",
+      ...PROVIDER_OPTIONS.map((opt, i) =>
+        `  ${i + 1}. **${opt.label}** — ${opt.hint}`,
+      ),
+      "\nType a number (1-4):",
+    ];
+    setChatMessages((prev) => [
+      ...prev,
+      { role: "assistant" as const, content: lines.join("\n") },
+    ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount only
+
+  // Show description suggestions when entering description phase
+  useEffect(() => {
+    if (onboardingPhase !== "description") return;
+    const suggestions = pickRandomDescriptions(3);
+    onboardingDataRef.current.descriptionSuggestions = suggestions;
+    const lines = [
+      "Describe your agent's personality:\n",
+      ...suggestions.map((s, i) => `  ${i + 1}. ${s}`),
+      "\nPick a number or type your own:",
+    ];
+    setChatMessages((prev) => [
+      ...prev,
+      { role: "assistant" as const, content: lines.join("\n") },
+    ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboardingPhase === "description"]);
+
+  // Show name suggestions when entering agent-name phase
+  useEffect(() => {
+    if (onboardingPhase !== "agent-name") return;
+    const names = pickRandomNames(3);
+    onboardingDataRef.current.nameSuggestions = names;
+    const lines = [
+      "Choose your agent name:\n",
+      ...names.map((n, i) => `  ${i + 1}. ${n}`),
+      "\nPick a number or type your own (lowercase, letters/numbers/hyphens, 3-20 chars):",
+    ];
+    setChatMessages((prev) => [
+      ...prev,
+      { role: "assistant" as const, content: lines.join("\n") },
+    ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboardingPhase === "agent-name"]);
 
   // Refs for autopilot timer closure stability
   const coreMessagesRef = useRef(coreMessages);
@@ -271,10 +369,255 @@ export default function App({
     return () => clearInterval(interval);
   }, [autopilotMode, autopilotIntervalMs, addLogEntry, runAutopilotTurn]);
 
+  // ── handleOnboardingInput — routes input based on current phase ────
+  const handleOnboardingInput = useCallback(async (userText: string) => {
+    const trimmed = userText.trim();
+    if (!trimmed) return;
+
+    switch (onboardingPhase) {
+      case "provider": {
+        setChatMessages((prev) => [...prev, { role: "user" as const, content: trimmed }]);
+        const num = parseInt(trimmed, 10);
+        if (num < 1 || num > PROVIDER_OPTIONS.length || isNaN(num)) {
+          setChatMessages((prev) => [...prev, { role: "assistant" as const, content: `Pick a number from 1 to ${PROVIDER_OPTIONS.length}.` }]);
+          return;
+        }
+        const selected = PROVIDER_OPTIONS[num - 1];
+
+        // Ollama not available yet
+        if (selected.value === "ollama") {
+          setChatMessages((prev) => [...prev, { role: "assistant" as const, content: "Ollama support is coming soon. Pick another provider." }]);
+          return;
+        }
+
+        onboardingDataRef.current.provider = selected.value;
+        setChatMessages((prev) => [...prev, { role: "assistant" as const, content: `Selected: **${selected.label}**` }]);
+
+        if (selected.value === "openai-oauth") {
+          // Codex OAuth flow
+          const { verifier, challenge } = generatePkce();
+          const oauthState = generateState();
+          const authorizeUrl = buildAuthorizeUrl({ state: oauthState, challenge });
+          oauthVerifierRef.current = verifier;
+          onboardingDataRef.current.oauthState = oauthState;
+
+          setChatMessages((prev) => [...prev, { role: "assistant" as const, content: "Opening browser for ChatGPT login..." }]);
+          setOnboardingPhase("oauth-waiting");
+          openBrowser(authorizeUrl);
+
+          try {
+            const result = await waitForCallback({
+              redirectUri: REDIRECT_URI,
+              expectedState: oauthState,
+            });
+            const tokens = await exchangeCodeForTokens({ code: result.code, codeVerifier: verifier });
+            oauthVerifierRef.current = null;
+
+            const cfg = loadConfig() ?? {} as Config;
+            (cfg as Config).provider = "openai-oauth";
+            (cfg as Config).model = DEFAULT_MODELS["openai-oauth"] ?? "gpt-5.3-codex";
+            (cfg as Config).auth = {
+              type: "oauth",
+              oauth: {
+                accessToken: tokens.accessToken,
+                refreshToken: tokens.refreshToken,
+                expiresAt: tokens.expiresAt,
+                clientId: tokens.clientId,
+              },
+            };
+            saveConfig(cfg as Config);
+            providerRef.current = "openai-oauth";
+
+            setChatMessages((prev) => [...prev, { role: "assistant" as const, content: "Logged in with ChatGPT!" }]);
+            setOnboardingPhase("description");
+          } catch {
+            // Fallback to manual paste
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "assistant" as const, content: `Couldn't detect the callback automatically.\n\nPaste the redirect URL from your browser here:\n\n${buildAuthorizeUrl({ state: oauthState, challenge })}` },
+            ]);
+            setOnboardingPhase("api-key");
+            setAwaitingApiKey("oauth-paste:" + oauthState);
+          }
+        } else {
+          // API key provider
+          const label = API_KEY_LABELS[selected.value] ?? "API key";
+          const placeholder = API_KEY_PLACEHOLDERS[selected.value] ?? "";
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant" as const, content: `Enter your ${label}${placeholder ? ` (${placeholder})` : ""}.\n\nYour key is stored locally and never shared with the AI model.` },
+          ]);
+          setOnboardingPhase("api-key");
+        }
+        return;
+      }
+
+      case "api-key": {
+        // Handle OAuth paste mode
+        if (awaitingApiKey?.startsWith("oauth-paste:")) {
+          setChatMessages((prev) => [...prev, { role: "user" as const, content: trimmed.slice(0, 40) + "..." }]);
+          const expectedState = awaitingApiKey.slice("oauth-paste:".length);
+          const parsed = parseCallbackUrl(trimmed, expectedState);
+          if ("error" in parsed) {
+            setChatMessages((prev) => [...prev, { role: "assistant" as const, content: `${parsed.error}\n\nPaste the full redirect URL.` }]);
+            return;
+          }
+
+          const verifier = oauthVerifierRef.current;
+          if (!verifier) {
+            setChatMessages((prev) => [...prev, { role: "assistant" as const, content: "OAuth session expired. Please restart." }]);
+            exit();
+            return;
+          }
+
+          setOnboardingPhase("api-key-validating");
+          try {
+            const tokens = await exchangeCodeForTokens({ code: parsed.code, codeVerifier: verifier });
+            oauthVerifierRef.current = null;
+            setAwaitingApiKey(null);
+
+            const cfg = loadConfig() ?? {} as Config;
+            (cfg as Config).provider = "openai-oauth";
+            (cfg as Config).model = DEFAULT_MODELS["openai-oauth"] ?? "gpt-5.3-codex";
+            (cfg as Config).auth = {
+              type: "oauth",
+              oauth: {
+                accessToken: tokens.accessToken,
+                refreshToken: tokens.refreshToken,
+                expiresAt: tokens.expiresAt,
+                clientId: tokens.clientId,
+              },
+            };
+            saveConfig(cfg as Config);
+            providerRef.current = "openai-oauth";
+
+            setChatMessages((prev) => [...prev, { role: "assistant" as const, content: "Logged in with ChatGPT!" }]);
+            setOnboardingPhase("description");
+          } catch (error: unknown) {
+            const msg = error instanceof Error ? error.message : "Unknown error";
+            setChatMessages((prev) => [...prev, { role: "assistant" as const, content: `OAuth failed: ${msg}\n\nPlease restart and try again.` }]);
+            setOnboardingPhase("api-key");
+          }
+          return;
+        }
+
+        // Normal API key paste
+        setChatMessages((prev) => [...prev, { role: "user" as const, content: "••••••••" }]);
+        const provider = onboardingDataRef.current.provider as string;
+        setOnboardingPhase("api-key-validating");
+        setValidatingKey(true);
+
+        const result = await validateApiKey(provider, trimmed);
+        setValidatingKey(false);
+
+        if (!result.ok) {
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant" as const, content: `Key validation failed: ${result.error}\n\nPaste a valid key to retry.` },
+          ]);
+          setOnboardingPhase("api-key");
+          return;
+        }
+
+        // Valid key — save config
+        const cfg = loadConfig() ?? {} as Config;
+        (cfg as Config).provider = provider as Config["provider"];
+        (cfg as Config).model = DEFAULT_MODELS[provider] ?? "";
+        (cfg as Config).auth = { type: "api-key", apiKey: trimmed };
+        saveConfig(cfg as Config);
+        providerRef.current = provider;
+
+        setChatMessages((prev) => [...prev, { role: "assistant" as const, content: `Key validated! Using **${providerLabel(provider)}**.` }]);
+        setOnboardingPhase("description");
+        return;
+      }
+
+      case "description": {
+        setChatMessages((prev) => [...prev, { role: "user" as const, content: trimmed }]);
+        const num = parseInt(trimmed, 10);
+        const suggestions = onboardingDataRef.current.descriptionSuggestions as string[] | undefined;
+        let description: string;
+        if (num >= 1 && num <= 3 && suggestions && suggestions[num - 1]) {
+          description = suggestions[num - 1];
+        } else {
+          description = trimmed;
+        }
+        onboardingDataRef.current.description = description;
+        setChatMessages((prev) => [...prev, { role: "assistant" as const, content: `Personality: **${description}**` }]);
+        setOnboardingPhase("agent-name");
+        return;
+      }
+
+      case "agent-name": {
+        setChatMessages((prev) => [...prev, { role: "user" as const, content: trimmed }]);
+        const num = parseInt(trimmed, 10);
+        const suggestions = onboardingDataRef.current.nameSuggestions as string[] | undefined;
+        let name: string;
+        if (num >= 1 && num <= 3 && suggestions && suggestions[num - 1]) {
+          name = suggestions[num - 1];
+        } else {
+          name = trimmed.toLowerCase();
+        }
+
+        const validationError = validateAgentName(name);
+        if (validationError) {
+          setChatMessages((prev) => [...prev, { role: "assistant" as const, content: validationError }]);
+          return;
+        }
+
+        onboardingDataRef.current.agentName = name;
+        setChatMessages((prev) => [...prev, { role: "assistant" as const, content: `Registering agent **"${name}"**...` }]);
+        setOnboardingPhase("registering");
+
+        const description = onboardingDataRef.current.description as string;
+        const regResult = await registerAgentApi(name, description);
+
+        if (!regResult.ok) {
+          if (regResult.retry && regResult.status === 409) {
+            // Name taken — go back to name phase
+            setChatMessages((prev) => [...prev, { role: "assistant" as const, content: regResult.error }]);
+            setOnboardingPhase("agent-name");
+          } else {
+            setChatMessages((prev) => [...prev, { role: "assistant" as const, content: regResult.error }]);
+            setOnboardingPhase("agent-name");
+          }
+          return;
+        }
+
+        // Registration success!
+        const verCode = regResult.verificationCode;
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "assistant" as const, content: `Agent **"${regResult.agentName}"** registered!\n\nVerification code: \`${verCode}\`` },
+        ]);
+        setOnboardingPhase("complete");
+
+        // Call onOnboardingComplete callback and exit
+        onOnboardingComplete?.({
+          agentName: regResult.agentName,
+          verificationCode: verCode,
+          apiStatus: null,
+        });
+        setTimeout(() => exit(), 1500);
+        return;
+      }
+
+      default:
+        return;
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onboardingPhase, awaitingApiKey, exit]);
+
   // ── sendMessage ────────────────────────────────────────────────────
   const sendMessage = useCallback(
     async (userText: string, displayRole: "user" | "autopilot" = "user") => {
       let skipChatDisplay = false;
+
+      // ── Route through onboarding if active ──────────────────────
+      if (onboardingPhase !== null && onboardingPhase !== "complete") {
+        void handleOnboardingInput(userText);
+        return;
+      }
 
       // ── Awaiting API key or OAuth callback URL for /model flow ────
       if (awaitingApiKey) {
@@ -772,10 +1115,8 @@ export default function App({
             "**System**",
             "",
             "  `/model`     — Show or switch LLM provider",
-            "  `/plugins`   — Browse and switch plugins",
             "  `/help`      — Show this help",
             "  `/exit`      — Exit (also `/quit`, `/q`)",
-            "  `/clear`     — Clear chat display",
             "  `Ctrl+C`     — Exit immediately",
           );
 
@@ -912,7 +1253,7 @@ export default function App({
         setToolName(undefined);
       }
     },
-    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry, pluginMap, hasAutopilot, hasJourneyStages, exit, debug, runAutopilotTurn, awaitingApiKey],
+    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry, pluginMap, hasAutopilot, hasJourneyStages, exit, debug, runAutopilotTurn, awaitingApiKey, onboardingPhase, handleOnboardingInput],
   );
   // Keep ref in sync so the autopilot timer always has the latest sendMessage
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
@@ -924,17 +1265,26 @@ export default function App({
     [sendMessage],
   );
 
+  // Determine if input should be active
+  const inputActive = !isLoading && !validatingKey &&
+    onboardingPhase !== "registering" &&
+    onboardingPhase !== "oauth-waiting" &&
+    onboardingPhase !== "api-key-validating" &&
+    onboardingPhase !== "complete";
+
   return (
     <Box flexDirection="column" width="100%" height="100%">
       <Box flexDirection="column" flexGrow={1} flexShrink={1}>
         <ChatView messages={chatMessages} streamingText={streamingText} />
-        {validatingKey && <Spinner label="Validating API key..." />}
-        {isLoading && toolName && <Spinner label={`Calling ${toolName}...`} />}
-        {isLoading && !toolName && <Spinner label={streamingText ? "Thinking..." : undefined} />}
+        {validatingKey && <Box paddingX={1}><Spinner label="Validating..." /></Box>}
+        {onboardingPhase === "registering" && <Box paddingX={1}><Spinner label="Registering agent..." /></Box>}
+        {onboardingPhase === "oauth-waiting" && <Box paddingX={1}><Spinner label="Waiting for login..." /></Box>}
+        {isLoading && !onboardingPhase && toolName && <Box paddingX={1}><Spinner label={`Calling ${toolName}...`} /></Box>}
+        {isLoading && !onboardingPhase && !toolName && !streamingText && <Box paddingX={1}><Spinner /></Box>}
       </Box>
 
       <Box flexShrink={0} width="100%">
-        <Input isActive={!isLoading && !validatingKey} onSubmit={handleSubmit} />
+        <Input isActive={inputActive} onSubmit={handleSubmit} />
       </Box>
 
       <Box flexShrink={0} width="100%">
@@ -951,7 +1301,9 @@ export default function App({
       </Box>
 
       <Box flexShrink={0} width="100%" paddingX={2} marginTop={1} marginBottom={1} justifyContent="space-between">
-        {hasJourneyStages ? (
+        {onboardingPhase !== null ? (
+          <Text dimColor>Ctrl+C to cancel</Text>
+        ) : hasJourneyStages ? (
           <>
             <Text dimColor>/help · /portfolio · /market · /model · /exit</Text>
             <Text dimColor>/auto on·off·set · Ctrl+C quit</Text>

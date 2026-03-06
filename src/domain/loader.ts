@@ -2,12 +2,16 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { execFileSync } from "node:child_process";
-import * as clack from "@clack/prompts";
+import React from "react";
+import { render } from "ink";
 import { PluginManifestSchema, type PluginManifest } from "./plugin.js";
 import { validatePluginUrl, validateAllowedPaths, scanForInjection } from "./validator.js";
 import { pluginDir, pluginManifestPath, pluginSkillPath, pluginMapPath, ensureDir, getRoot } from "../config/paths.js";
 import { setActivePlugin, getActivePlugin, loadState } from "../config/store.js";
 import { PLUGIN_REGISTRY } from "./registry.js";
+import PluginInstaller from "../ui/PluginInstaller.js";
+import PluginPicker from "../ui/PluginPicker.js";
+import type { PluginChoice } from "../ui/PluginPicker.js";
 
 // ─── Plugin Map Types ──────────────────────────────────────────────────
 
@@ -368,156 +372,101 @@ function savePluginToDisk(
 
 /**
  * Install a plugin from a skill.md URL.
- *
- * Flow:
- *  1. Validate URL (HTTPS, not private/localhost)
- *  2. Fetch skill.md
- *  3. Parse ENGINE:META → manifest fields
- *  4. Validate manifest schema + allowedPaths safety
- *  5. Scan narrative content for prompt injection
- *  6. Check official certified registry
- *  7. Show details and confirm with user
- *  8. Save manifest.json + skill.md to plugins dir (chmod 600)
- *  9. Set as active plugin in state.json
- *
- * Exits the process on validation failure or user cancellation.
+ * Uses an Ink-based UI for progress and confirmation.
  */
 export async function addPlugin(manifestUrl: string): Promise<void> {
-  clack.intro(" astra add ");
+  const { waitUntilExit } = render(
+    React.createElement(PluginInstaller, {
+      manifestUrl,
+      onInstall: async (url: string) => {
+        // Step 1 — Validate URL
+        const urlResult = validatePluginUrl(url);
+        if (!urlResult.ok) {
+          throw new Error(urlResult.reason);
+        }
 
-  // Step 1 — Validate URL
-  const urlResult = validatePluginUrl(manifestUrl);
-  if (!urlResult.ok) {
-    clack.log.error(urlResult.reason);
-    clack.outro("Installation cancelled.");
-    process.exit(1);
-  }
+        // Step 2 — Fetch skill.md
+        let skillMdContent: string;
+        try {
+          skillMdContent = await fetchWithLimit(
+            urlResult.url.toString(),
+            MAX_SKILL_MD_BYTES,
+            FETCH_TIMEOUT_MS,
+          );
+        } catch (err) {
+          throw new Error(
+            `Could not fetch plugin: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
 
-  // Step 2 — Fetch skill.md
-  const spin = clack.spinner();
-  spin.start(`Fetching ${urlResult.url.hostname}...`);
+        // Step 3 — Parse ENGINE:META
+        const sections = parseEngineSections(skillMdContent);
+        const metaSection = sections["META"];
 
-  let skillMdContent: string;
-  try {
-    skillMdContent = await fetchWithLimit(
-      urlResult.url.toString(),
-      MAX_SKILL_MD_BYTES,
-      FETCH_TIMEOUT_MS,
-    );
-  } catch (err) {
-    spin.stop("Fetch failed.");
-    clack.log.error(
-      `Could not fetch plugin: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    clack.outro("Installation cancelled.");
-    process.exit(1);
-  }
+        if (!metaSection) {
+          throw new Error(
+            "This file has no ## ENGINE:META section and cannot be installed as a plugin.",
+          );
+        }
 
-  spin.stop("Fetched.");
+        // Step 4 — Build and validate manifest
+        const manifestData = buildManifestFromMeta(metaSection);
+        const manifestResult = PluginManifestSchema.safeParse(manifestData);
 
-  // Step 3 — Parse ENGINE:META
-  const sections = parseEngineSections(skillMdContent);
-  const metaSection = sections["META"];
+        if (!manifestResult.success) {
+          throw new Error(
+            `Plugin manifest is incomplete: ${manifestResult.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ")}`,
+          );
+        }
 
-  if (!metaSection) {
-    clack.log.error("This file has no ## ENGINE:META section and cannot be installed as a plugin.");
-    clack.log.info(
-      "Plugin skill.md files must include an ## ENGINE:META section with name, apiBase, and allowedPaths.",
-    );
-    clack.outro("Installation cancelled.");
-    process.exit(1);
-  }
+        const manifest = manifestResult.data;
 
-  // Step 4 — Build and validate manifest
-  const manifestData = buildManifestFromMeta(metaSection);
-  const manifestResult = PluginManifestSchema.safeParse(manifestData);
+        // Validate allowedPaths safety
+        const pathsResult = validateAllowedPaths(manifest.allowedPaths);
+        if (!pathsResult.ok) {
+          throw new Error(`Security check failed: ${pathsResult.reason}`);
+        }
 
-  if (!manifestResult.success) {
-    clack.log.error(
-      `Plugin manifest is incomplete: ${manifestResult.error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ")}`,
-    );
-    clack.outro("Installation cancelled.");
-    process.exit(1);
-  }
+        // Step 5 — Scan narrative for injection
+        const narrative = extractNarrativeContent(skillMdContent);
+        const injectionResult = scanForInjection(narrative);
+        if (!injectionResult.ok) {
+          throw new Error(
+            `Security scan blocked: skill.md matched injection pattern "${injectionResult.pattern}".`,
+          );
+        }
 
-  const manifest = manifestResult.data;
+        // Step 6 — Registry check
+        const isCertified = await checkRegistry(manifest.name);
 
-  // Validate allowedPaths safety (defense in depth — engine enforces this at runtime too)
-  const pathsResult = validateAllowedPaths(manifest.allowedPaths);
-  if (!pathsResult.ok) {
-    clack.log.error(`Security check failed: ${pathsResult.reason}`);
-    clack.outro("Installation cancelled.");
-    process.exit(1);
-  }
+        let apiBaseHost: string;
+        try {
+          apiBaseHost = new URL(manifest.apiBase).hostname;
+        } catch {
+          apiBaseHost = manifest.apiBase;
+        }
 
-  // Step 5 — Scan narrative for injection
-  const narrative = extractNarrativeContent(skillMdContent);
-  const injectionResult = scanForInjection(narrative);
-  if (!injectionResult.ok) {
-    clack.log.error(
-      `Security scan blocked: skill.md matched injection pattern "${injectionResult.pattern}".`,
-    );
-    clack.log.warn("This plugin may be attempting prompt injection. Installation blocked.");
-    clack.outro("Installation cancelled.");
-    process.exit(1);
-  }
-
-  // Step 6 — Registry check (silently fails if network unavailable)
-  const spin2 = clack.spinner();
-  spin2.start("Checking registry...");
-  const isCertified = await checkRegistry(manifest.name);
-  spin2.stop(isCertified ? "Certified." : "Registry checked.");
-
-  // Show plugin details
-  let apiBaseHost: string;
-  try {
-    apiBaseHost = new URL(manifest.apiBase).hostname;
-  } catch {
-    apiBaseHost = manifest.apiBase;
-  }
-
-  clack.log.info(`Plugin:      ${manifest.name} v${manifest.version}`);
-  clack.log.info(`Description: ${manifest.description}`);
-  clack.log.info(`API:         ${apiBaseHost}`);
-
-  if (isCertified) {
-    clack.log.success(`Certified ✓  Official @astra-cli registry`);
-  } else {
-    clack.log.warn(`Uncertified  Not in the official registry`);
-    clack.log.warn(`             Source: ${urlResult.url.hostname}`);
-  }
-
-  // Step 7 — Confirm with user
-  const message = isCertified
-    ? `Install ${manifest.name}?`
-    : `Install uncertified plugin "${manifest.name}"? API calls will go to ${apiBaseHost}`;
-
-  const confirmed = await clack.confirm({ message, initialValue: isCertified });
-
-  if (clack.isCancel(confirmed) || !confirmed) {
-    clack.outro("Installation cancelled.");
-    process.exit(0);
-  }
-
-  // Step 8 — Save to disk (manifest.json + skill.md, both chmod 600)
-  // Attach the original install URL so future skill.md refreshes use the right source.
-  const manifestWithSkillUrl: PluginManifest = { ...manifest, skillUrl: urlResult.url.toString() };
-  try {
-    savePluginToDisk(manifestWithSkillUrl, skillMdContent, sections);
-  } catch (err) {
-    clack.log.error(
-      `Failed to save plugin: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    clack.outro("Installation failed.");
-    process.exit(1);
-  }
-
-  // Step 9 — Set as active plugin
-  setActivePlugin(manifestWithSkillUrl.name);
-
-  clack.outro(
-    `Plugin "${manifest.name}" installed successfully.\nRun \`astra\` to load it, or \`astra --plugin ${manifest.name}\` for this session only.`,
+        return {
+          details: {
+            name: manifest.name,
+            version: manifest.version,
+            description: manifest.description,
+            apiHost: apiBaseHost,
+            isCertified,
+          },
+          confirm: () => {
+            // Save to disk
+            const manifestWithSkillUrl: PluginManifest = { ...manifest, skillUrl: urlResult.url.toString() };
+            savePluginToDisk(manifestWithSkillUrl, skillMdContent, sections);
+            setActivePlugin(manifestWithSkillUrl.name);
+          },
+        };
+      },
+    }),
+    { incrementalRendering: true },
   );
+
+  await waitUntilExit();
 }
 
 /**
@@ -541,7 +490,7 @@ export function listInstalledPlugins(): PluginManifest[] {
 }
 
 /**
- * Interactive plugin picker using clack.
+ * Interactive plugin picker using Ink.
  * Shows the curated PLUGIN_REGISTRY with install status.
  * Handles: already active, installed (switch), not installed (full wizard).
  *
@@ -549,7 +498,7 @@ export function listInstalledPlugins(): PluginManifest[] {
  */
 export async function runPluginsPicker(): Promise<void> {
   if (!loadState()) {
-    clack.log.error("No configuration found. Run `astra` to complete setup first.");
+    console.error("No configuration found. Run `astra` to complete setup first.");
     process.exit(1);
   }
 
@@ -569,9 +518,7 @@ export async function runPluginsPicker(): Promise<void> {
   const installed = listInstalledPlugins();
   const installedNames = new Set(["astranova", ...installed.map((p) => p.name)]);
 
-  clack.intro(" astra plugins ");
-
-  const choices = PLUGIN_REGISTRY.map((entry) => {
+  const choices: PluginChoice[] = PLUGIN_REGISTRY.map((entry) => {
     const isActive = entry.name === activePlugin;
     const isInstalled = installedNames.has(entry.name);
     const status: "active" | "installed" | "not_installed" = isActive
@@ -579,47 +526,46 @@ export async function runPluginsPicker(): Promise<void> {
       : isInstalled
         ? "installed"
         : "not_installed";
-    const statusLabel = isActive ? "(active)" : isInstalled ? "(installed)" : "(not installed)";
     return {
-      value: entry.name,
-      label: `${entry.name.padEnd(12)} ${statusLabel}`,
-      hint: entry.tagline,
+      name: entry.name,
+      tagline: entry.tagline,
       status,
-      entry,
+      skillUrl: entry.skillUrl ?? undefined,
     };
   });
 
-  const selected = await clack.select<(typeof choices)[number]["value"]>({
-    message: "Select a plugin:",
-    options: choices.map((c) => ({ value: c.value, label: c.label, hint: c.hint })),
+  await new Promise<unknown>((resolve) => {
+    const { waitUntilExit } = render(
+      React.createElement(PluginPicker, {
+        choices,
+        onSelect: (choice: PluginChoice) => {
+          if (choice.status === "active") {
+            console.log(`\n  ${choice.name} is already the active plugin.\n`);
+            relaunchTUI();
+          }
+
+          if (choice.status === "installed") {
+            setActivePlugin(choice.name);
+            console.log(`\n  Switched to ${choice.name}. Restarting...\n`);
+            relaunchTUI();
+          }
+
+          // Not installed — run full install wizard, then relaunch TUI
+          if (!choice.skillUrl) {
+            console.error(`\n  ${choice.name} has no install URL.\n`);
+            process.exit(1);
+          }
+          void addPlugin(choice.skillUrl).then(() => {
+            relaunchTUI();
+          });
+        },
+        onCancel: () => {
+          relaunchTUI();
+        },
+      }),
+      { incrementalRendering: true },
+    );
+
+    void waitUntilExit().then(resolve);
   });
-
-  if (clack.isCancel(selected)) {
-    clack.outro("No changes made.");
-    relaunchTUI();
-  }
-
-  const choice = choices.find((c) => c.value === selected)!;
-
-  // Already active — go back to TUI
-  if (choice.status === "active") {
-    clack.outro(`${choice.entry.name} is already the active plugin.`);
-    relaunchTUI();
-  }
-
-  // Installed but not active — switch and relaunch TUI
-  if (choice.status === "installed") {
-    setActivePlugin(choice.entry.name);
-    clack.outro(`Switched to ${choice.entry.name}. Restarting...`);
-    relaunchTUI();
-  }
-
-  // Not installed — run full install wizard, then relaunch TUI on success
-  if (!choice.entry.skillUrl) {
-    clack.log.error(`${choice.entry.name} has no install URL.`);
-    process.exit(1);
-  }
-  await addPlugin(choice.entry.skillUrl);
-  // addPlugin() calls process.exit() on failure/cancel; returns on success
-  relaunchTUI();
 }

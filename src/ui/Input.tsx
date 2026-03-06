@@ -1,6 +1,5 @@
 import React, { useState } from "react";
-import { Box, Text } from "ink";
-import TextInput from "ink-text-input";
+import { Box, Text, useInput } from "ink";
 
 interface InputProps {
   /** Whether the input should accept keystrokes. */
@@ -15,24 +14,39 @@ export default function Input({
 }: InputProps): React.JSX.Element {
   const [value, setValue] = useState("");
 
-  const handleSubmit = (submitted: string) => {
-    const trimmed = submitted.trim();
-    if (!trimmed) return;
-    onSubmit(trimmed);
-    setValue("");
-  };
+  useInput((input, key) => {
+    if (!isActive) return;
+
+    if (key.return) {
+      const trimmed = value.trim();
+      if (!trimmed) return;
+      onSubmit(trimmed);
+      setValue("");
+      return;
+    }
+
+    if (key.backspace || key.delete) {
+      setValue(prev => prev.slice(0, -1));
+      return;
+    }
+
+    // Ignore control/meta keys
+    if (key.ctrl || key.meta || key.escape ||
+        key.upArrow || key.downArrow || key.leftArrow || key.rightArrow ||
+        key.tab || key.pageUp || key.pageDown || key.home || key.end) {
+      return;
+    }
+
+    if (input) {
+      setValue(prev => prev + input);
+    }
+  }, { isActive });
 
   return (
     <Box width="100%" paddingX={2} paddingY={1}>
       <Text color={isActive ? "yellow" : "gray"} bold>{"❯❯  "}</Text>
-      <TextInput
-        value={value}
-        onChange={setValue}
-        onSubmit={handleSubmit}
-        focus={isActive}
-        showCursor={isActive}
-        placeholder=""
-      />
+      <Text>{value}</Text>
+      {isActive && <Text color="green">█</Text>}
     </Box>
   );
 }
