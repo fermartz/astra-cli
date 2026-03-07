@@ -1018,6 +1018,9 @@ async function handleChat(state: SidecarState, message: string): Promise<void> {
     const baseMsgs = result.compactedMessages ?? state.coreMessages;
     state.coreMessages = [...baseMsgs, ...result.responseMessages];
 
+    // Refresh hasStrategy — LLM may have saved a strategy during this turn
+    state.profile.hasStrategy = !!loadStrategy(state.agentName);
+
     // Save session
     saveSession({
       agentName: state.agentName,

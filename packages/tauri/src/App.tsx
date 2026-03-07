@@ -88,6 +88,7 @@ function App() {
     validateModelKey,
     submitModelOAuthPaste,
     cancelModelSwitch,
+    readStrategy,
     runStrategy,
     setupStrategy,
     daemonRunning,
@@ -207,7 +208,14 @@ function App() {
     if (cmd === "/strategy") {
       const sub = parts[1]?.toLowerCase();
       if (sub === "status") {
-        void sendMessage("Show my current trading strategy.");
+        readStrategy().then((content) => {
+          addLocalMessage(
+            content
+              ? `**Your current strategy:**\n\n${content}`
+              : "No strategy set up yet. Use `/strategy setup` to create one.",
+            "info",
+          );
+        });
       } else if (sub === "setup") {
         void setupStrategy();
       } else if (!sub) {

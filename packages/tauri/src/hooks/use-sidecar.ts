@@ -87,6 +87,9 @@ export function useSidecar() {
   // Ref for streaming accumulation (avoids stale closure issues)
   const streamRef = useRef("");
 
+  // Pending strategy read callback (resolved when sidecar responds)
+  const strategyReadCb = useRef<((content: string | null) => void) | null>(null);
+
   // Handle a parsed sidecar message
   const handleMessage = useCallback((msg: SidecarResponse) => {
     switch (msg.type) {
@@ -182,8 +185,13 @@ export function useSidecar() {
         break;
 
       case "strategy:content":
+        strategyReadCb.current?.(msg.content);
+        strategyReadCb.current = null;
+        break;
+
       case "strategy:empty":
-        // Handled via pendingStrategyAction in App.tsx
+        strategyReadCb.current?.(null);
+        strategyReadCb.current = null;
         break;
 
       case "auto:state":
@@ -460,6 +468,17 @@ export function useSidecar() {
   }, []);
 
   // Strategy commands (load from disk + inject into prompt, like CLI does)
+  const readStrategy = useCallback(async (): Promise<string | null> => {
+    return new Promise((resolve) => {
+      strategyReadCb.current = resolve;
+      const request: SidecarRequest = { type: "strategy:read" };
+      invoke("send_to_sidecar", { message: JSON.stringify(request) }).catch(() => {
+        strategyReadCb.current = null;
+        resolve(null);
+      });
+    });
+  }, []);
+
   const runStrategy = useCallback(async () => {
     setStatus("streaming");
     setError(null);
@@ -575,6 +594,7 @@ export function useSidecar() {
     validateModelKey,
     submitModelOAuthPaste,
     cancelModelSwitch,
+    readStrategy,
     runStrategy,
     setupStrategy,
     daemonRunning,

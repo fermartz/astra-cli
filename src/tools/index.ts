@@ -12,10 +12,10 @@ import {
 } from "./agent-management.js";
 import { updateMemoryTool } from "./memory.js";
 import { readStrategyTool, writeStrategyTool } from "./strategy.js";
-import { getActiveManifest } from "../domain/plugin.js";
 
-/** Base tools available to every plugin. */
-const BASE_TOOLS = {
+/** All tools available to the LLM. Strategy tools are always included —
+ *  autopilot requires a strategy, not the other way around. */
+const ALL_TOOLS = {
   api_call: apiCallTool,
   read_config: readConfigTool,
   write_config: writeConfigTool,
@@ -26,31 +26,18 @@ const BASE_TOOLS = {
   switch_agent: switchAgentTool,
   list_agents: listAgentsTool,
   update_memory: updateMemoryTool,
-};
-
-/** AstraNova-only tools (autopilot extension). */
-const AUTOPILOT_TOOLS = {
   read_strategy: readStrategyTool,
   write_strategy: writeStrategyTool,
 };
 
 /**
- * Build the active tool set based on the current plugin manifest.
- * Called at turn time so the tool set matches the active plugin.
- *
- * - Base tools: always included (api_call, config, wallet, agent management, memory)
- * - Autopilot tools: only when manifest.extensions.autopilot is true
+ * Build the active tool set. Called at turn time.
+ * Autopilot gating is handled at the UI layer (slash commands),
+ * not here — the LLM always has access to strategy tools.
  */
 export function buildAstraTools() {
-  const manifest = getActiveManifest();
-  if (manifest.extensions?.autopilot) {
-    return { ...BASE_TOOLS, ...AUTOPILOT_TOOLS };
-  }
-  return BASE_TOOLS;
+  return ALL_TOOLS;
 }
 
-/**
- * Static full tool set — kept for test compatibility.
- * Production code uses buildAstraTools() for plugin-aware filtering.
- */
-export const astraTools = { ...BASE_TOOLS, ...AUTOPILOT_TOOLS };
+/** Static full tool set — kept for test compatibility. */
+export const astraTools = ALL_TOOLS;
