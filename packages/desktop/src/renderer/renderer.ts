@@ -152,7 +152,7 @@ const term = new Terminal({
   fontFamily: '"SF Mono", "JetBrains Mono", "Fira Code", "Cascadia Code", "Menlo", monospace',
   theme: currentTheme,
   allowProposedApi: true,
-  scrollback: 1000,
+  scrollback: 0,
 });
 
 function applyTheme(key: string): void {

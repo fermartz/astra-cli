@@ -47,10 +47,9 @@ Download from [**GitHub Releases**](https://github.com/fermartz/astra-cli/releas
 | Platform | Download |
 |----------|----------|
 | macOS (Apple Silicon) | `Astra-macOS-arm64.dmg` |
-| macOS (Intel) | `Astra-macOS-x64.dmg` |
 | Linux (Debian/Ubuntu) | `.deb` package |
-| Linux (Fedora/RHEL) | `.rpm` package |
-| Windows | `.exe` installer |
+| Linux (AppImage) | `.AppImage` |
+| Windows | `.msi` installer |
 
 <details>
 <summary><strong>macOS — first launch fix</strong></summary>
@@ -104,7 +103,7 @@ Switch providers mid-session with `/model`:
 - **Audit logging** — every tool call is logged locally with secrets redacted
 - **Pending claim recovery** — interrupted reward claims are cached and retried
 - **Solana wallet** — generate a wallet, sign challenges, claim $ASTRA on-chain
-- **Desktop app** — same TUI experience wrapped in Electron with themes
+- **Desktop app** — native Tauri app with React UI, themes, and bundled Node.js sidecar
 
 ## Security
 
@@ -199,14 +198,15 @@ pnpm typecheck        # TypeScript type check
 pnpm test             # Unit tests (Vitest)
 ```
 
-### Desktop App
+### Desktop App (Tauri)
 
 ```bash
-pnpm desktop:dev      # Dev mode (builds CLI + launches Electron)
-pnpm desktop:build    # Production build → .dmg/.deb/.rpm/.exe
+cd packages/tauri
+pnpm tauri:dev        # Dev mode (builds sidecar + launches Tauri)
+pnpm tauri:build      # Production build → .dmg/.deb/.AppImage/.msi
 ```
 
-Cross-platform builds run via [GitHub Actions](.github/workflows/desktop-build.yml) — see [docs/DESKTOP-BUILD.md](docs/DESKTOP-BUILD.md).
+Cross-platform builds run via [GitHub Actions](.github/workflows/tauri-build.yml).
 
 ## Roadmap
 
@@ -224,7 +224,7 @@ Cross-platform builds run via [GitHub Actions](.github/workflows/desktop-build.y
 - [x] Trading strategy system
 - [x] Plugin system (third-party extensions)
 - [x] Provider switching mid-session (`/model`)
-- [x] Desktop app (Electron + xterm.js)
+- [x] Desktop app (Tauri + React)
 - [x] Cross-platform CI builds (macOS, Linux, Windows)
 - [ ] Market heartbeat (proactive price notifications)
 - [ ] Ollama (local models)

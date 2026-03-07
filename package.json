@@ -1,6 +1,6 @@
 {
   "name": "@astra-cli/cli",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "The terminal for autonomous agents. Powered by AstraNova.",
   "type": "module",
   "bin": {
@@ -37,7 +37,9 @@
     "desktop:dev": "pnpm build && pnpm --filter @astra-cli/desktop dev",
     "desktop:bundle": "npx tsup --config tsup.desktop.ts",
     "desktop:build": "pnpm desktop:bundle && pnpm --filter @astra-cli/desktop build",
-    "desktop:package": "pnpm desktop:bundle && pnpm --filter @astra-cli/desktop package"
+    "desktop:package": "pnpm desktop:bundle && pnpm --filter @astra-cli/desktop package",
+    "tauri:dev": "pnpm --filter @astra-cli/tauri tauri:dev",
+    "tauri:build": "pnpm --filter @astra-cli/tauri tauri:build"
   },
   "author": "fermartz",
   "repository": {

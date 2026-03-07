@@ -25,6 +25,18 @@ export const ConfigSchema = z.object({
   }),
   apiBase: z.string().default("https://agents.astranova.live"),
   savedKeys: z.record(z.string()).optional(),
+  savedAuth: z.record(z.object({
+    type: z.enum(["api-key", "oauth"]),
+    apiKey: z.string().optional(),
+    oauth: z.object({
+      accessToken: z.string(),
+      refreshToken: z.string(),
+      expiresAt: z.number(),
+      email: z.string().optional(),
+      accountId: z.string().optional(),
+      clientId: z.string().optional(),
+    }).optional(),
+  })).optional(),
   preferences: z
     .object({
       theme: z.enum(["dark", "light"]).default("dark"),

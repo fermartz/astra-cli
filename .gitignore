@@ -6,6 +6,9 @@ dist/
 dist-desktop/
 packages/desktop/dist/
 packages/desktop/out/
+packages/tauri/src-tauri/target/
+packages/tauri/sidecar-dist/
+packages/tauri/node-bin/
 
 # Environment / secrets
 .env

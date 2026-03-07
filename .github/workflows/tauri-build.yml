@@ -1,10 +1,10 @@
-name: Desktop Build
+name: Tauri Build
 
 on:
   workflow_dispatch:
   push:
     tags:
-      - "desktop-v*"
+      - "tauri-v*"
 
 permissions:
   contents: write
@@ -37,52 +37,53 @@ jobs:
           node-version: 22
           cache: pnpm
 
-      # Install root deps (CLI source + tsup for desktop bundle)
-      - name: Install root dependencies
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/tauri/src-tauri -> target
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Install desktop package deps (electron, node-pty, forge)
-      - name: Install desktop dependencies
-        run: pnpm install --frozen-lockfile
-        working-directory: packages/desktop
+      - name: Build sidecar
+        run: pnpm sidecar:build
+        working-directory: packages/tauri
 
-      # Bundle CLI into self-contained dist-desktop/astra.js
-      - name: Bundle CLI for desktop
-        run: pnpm desktop:bundle
+      - name: Download Node.js binary
+        run: node scripts/download-node.mjs
+        working-directory: packages/tauri
 
-      # Compile desktop TypeScript + build renderer
-      - name: Compile desktop
-        run: pnpm compile
-        working-directory: packages/desktop
-
-      # Stage native modules (resolve pnpm symlinks for packager)
-      - name: Stage native modules
-        run: node scripts/stage-native-modules.mjs
-        working-directory: packages/desktop
-
-      # Verify node-pty is staged correctly before packaging
-      - name: Verify native modules
+      - name: Verify bundled resources
         shell: bash
         run: |
-          echo "=== node_modules/node-pty ==="
-          ls -la packages/desktop/node_modules/node-pty/ || echo "MISSING!"
-          echo "=== .node binaries ==="
-          find packages/desktop/node_modules/node-pty -name "*.node" 2>/dev/null || echo "No .node files!"
-          echo "=== prebuilds ==="
-          ls -la packages/desktop/node_modules/node-pty/prebuilds/ 2>/dev/null || echo "No prebuilds dir"
-          find packages/desktop/node_modules/node-pty/prebuilds -type f 2>/dev/null || echo "No prebuild files"
+          echo "=== node-bin/ ==="
+          ls -la packages/tauri/node-bin/
+          echo "=== sidecar-dist/ ==="
+          ls -la packages/tauri/sidecar-dist/
 
-      # Build platform-specific installer
-      - name: Make installer
-        run: npx electron-forge make
-        working-directory: packages/desktop
+      - name: Build Tauri app
+        run: pnpm tauri build
+        working-directory: packages/tauri
 
       # Upload artifacts (available from Actions tab)
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Astra-${{ matrix.platform }}
-          path: packages/desktop/out/make/**/*
+          path: |
+            packages/tauri/src-tauri/target/release/bundle/**/*.dmg
+            packages/tauri/src-tauri/target/release/bundle/**/*.deb
+            packages/tauri/src-tauri/target/release/bundle/**/*.AppImage
+            packages/tauri/src-tauri/target/release/bundle/**/*.msi
 
       # Collect installer files for release upload
       - name: Collect release files
@@ -90,16 +91,15 @@ jobs:
         run: |
           mkdir -p release-assets
           if [ "$RUNNER_OS" == "macOS" ]; then
-            find packages/desktop/out/make -name '*.dmg' -exec cp {} release-assets/Astra-${{ matrix.platform }}.dmg \; 2>/dev/null || true
+            find packages/tauri/src-tauri/target/release/bundle -name '*.dmg' -exec cp {} release-assets/Astra-${{ matrix.platform }}.dmg \; 2>/dev/null || true
           elif [ "$RUNNER_OS" == "Linux" ]; then
-            cp packages/desktop/out/make/deb/x64/*.deb release-assets/ 2>/dev/null || true
-            cp packages/desktop/out/make/rpm/x64/*.rpm release-assets/ 2>/dev/null || true
+            find packages/tauri/src-tauri/target/release/bundle -name '*.deb' -exec cp {} release-assets/ \; 2>/dev/null || true
+            find packages/tauri/src-tauri/target/release/bundle -name '*.AppImage' -exec cp {} release-assets/ \; 2>/dev/null || true
           elif [ "$RUNNER_OS" == "Windows" ]; then
-            cp packages/desktop/out/make/squirrel.windows/x64/*.exe release-assets/ 2>/dev/null || true
+            find packages/tauri/src-tauri/target/release/bundle -name '*.msi' -exec cp {} release-assets/ \; 2>/dev/null || true
           fi
           ls -la release-assets/
 
-      # Upload release files as artifact for the release job
       - name: Upload release assets
         uses: actions/upload-artifact@v4
         with:
@@ -110,7 +110,7 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    if: startsWith(github.ref, 'refs/tags/tauri-v')
 
     steps:
       - name: Download all release assets
@@ -133,10 +133,9 @@ jobs:
             | Platform | File | Notes |
             |----------|------|-------|
             | macOS (Apple Silicon) | `Astra-macOS-arm64.dmg` | M1/M2/M3/M4 |
-            | macOS (Intel) | `Astra-macOS-x64.dmg` | Older Macs |
             | Linux (Debian/Ubuntu) | `.deb` | `sudo dpkg -i <file>.deb` |
-            | Linux (Fedora/RHEL) | `.rpm` | `sudo rpm -i <file>.rpm` |
-            | Windows | `.exe` | Squirrel installer |
+            | Linux (AppImage) | `.AppImage` | `chmod +x <file>.AppImage && ./<file>.AppImage` |
+            | Windows | `.msi` | Standard installer |
 
             ### macOS — first launch
 

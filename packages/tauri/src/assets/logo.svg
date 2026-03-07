@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <defs>
+    <!-- Base dark frame -->
+    <linearGradient id="base" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a1a2e" />
+      <stop offset="100%" stop-color="#16213e" />
+    </linearGradient>
+    <!-- Corner glow: cyan top-left -->
+    <radialGradient id="g1" cx="10%" cy="10%" r="60%">
+      <stop offset="0%" stop-color="rgb(0,255,255)" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="rgb(0,255,255)" stop-opacity="0" />
+    </radialGradient>
+    <!-- Corner glow: magenta top-right -->
+    <radialGradient id="g2" cx="90%" cy="10%" r="60%">
+      <stop offset="0%" stop-color="rgb(255,0,255)" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="rgb(255,0,255)" stop-opacity="0" />
+    </radialGradient>
+    <!-- Corner glow: white bottom-left -->
+    <radialGradient id="g3" cx="10%" cy="90%" r="60%">
+      <stop offset="0%" stop-color="rgb(255,255,255)" stop-opacity="0.7" />
+      <stop offset="100%" stop-color="rgb(255,255,255)" stop-opacity="0" />
+    </radialGradient>
+    <!-- Corner glow: yellow bottom-right -->
+    <radialGradient id="g4" cx="90%" cy="90%" r="60%">
+      <stop offset="0%" stop-color="rgb(255,255,0)" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="rgb(255,255,0)" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+  <!-- Outer frame layers -->
+  <rect x="7.5" y="7.5" width="105" height="105" rx="14.89" ry="14.89" fill="url(#base)" />
+  <rect x="7.5" y="7.5" width="105" height="105" rx="14.89" ry="14.89" fill="url(#g1)" />
+  <rect x="7.5" y="7.5" width="105" height="105" rx="14.89" ry="14.89" fill="url(#g2)" />
+  <rect x="7.5" y="7.5" width="105" height="105" rx="14.89" ry="14.89" fill="url(#g3)" />
+  <rect x="7.5" y="7.5" width="105" height="105" rx="14.89" ry="14.89" fill="url(#g4)" />
+  <!-- Inner face -->
+  <rect x="19.83" y="19.83" width="80.34" height="80.34" rx="14.89" ry="14.89" fill="#000" />
+  <!-- Eyes -->
+  <circle cx="40.85" cy="53.61" r="6" fill="#fff" />
+  <circle cx="79.85" cy="53.61" r="6" fill="#fff" />
+</svg>

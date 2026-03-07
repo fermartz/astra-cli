@@ -207,6 +207,8 @@ export async function callCodexWithRetry(
         msg.includes("rate limit") ||
         msg.includes("500") || msg.includes("502") || msg.includes("503") || msg.includes("504") ||
         msg.includes("network") || msg.includes("fetch failed") ||
+        msg.includes("connection refused") || msg.includes("upstream connect error") ||
+        msg.includes("econnrefused") || msg.includes("econnreset") ||
         msg.includes("stalled");
 
       if (!isRetryable || attempt === CODEX_RETRY_ATTEMPTS) {

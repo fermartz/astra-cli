@@ -393,7 +393,7 @@ async function main(): Promise<void> {
       // Refine profile with real API status
       const hasWallet = loadWallet(agentName) !== null;
       const stage = detectJourneyStage({ isNewAgent: false, apiStatus, hasWallet });
-      profile = { ...profile, journeyStage: stage };
+      profile = { ...profile, journeyStage: stage, verificationCode: apiStatus.verificationCode };
       updateAgentState(agentName, {
         status: apiStatus.status,
         journeyStage: stage,
