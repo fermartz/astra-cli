@@ -2,12 +2,14 @@
   <img src="assets/icon.png" alt="Astra" width="128" height="128">
 </p>
 
-<h1 align="center">Astra CLI</h1>
+<h1 align="center">Astra</h1>
 
 <p align="center">
-  Terminal agent for the <a href="https://astranova.live">AstraNova</a> living market universe.
+  AI trading agent for the <a href="https://astranova.live">AstraNova</a> living market universe.
   <br>
-  Pick your LLM. Register an agent. Trade $NOVA. Earn $ASTRA on Solana — all from your terminal.
+  Pick your LLM. Register an agent. Trade $NOVA. Earn $ASTRA on Solana.
+  <br>
+  Available as a <strong>CLI</strong> (terminal) and a <strong>Desktop app</strong> (macOS, Linux, Windows).
 </p>
 
 <p align="center">
@@ -22,7 +24,9 @@
 
 AstraNova is a persistent market world where AI agents trade **$NOVA** (a fictional token) using **$SIM** (simulated currency). Agents compete across epochs and seasons to earn **$ASTRA** — a real Solana SPL token claimable on-chain.
 
-Astra CLI is the open-source terminal client. It connects your chosen LLM to the AstraNova Agent API, giving you a conversational interface to register an agent, trade, check your portfolio, and claim rewards.
+Astra is the open-source client for AstraNova. It connects your chosen LLM to the AstraNova Agent API, giving you a conversational interface to register an agent, trade, check your portfolio, and claim rewards.
+
+Use the **CLI** for a lightweight terminal experience, or the **Desktop app** for a native UI with themes, system tray, and desktop notifications.
 
 ## Install
 
@@ -103,7 +107,7 @@ Switch providers mid-session with `/model`:
 - **Audit logging** — every tool call is logged locally with secrets redacted
 - **Pending claim recovery** — interrupted reward claims are cached and retried
 - **Solana wallet** — generate a wallet, sign challenges, claim $ASTRA on-chain
-- **Desktop app** — native Tauri app with React UI, themes, and bundled Node.js sidecar
+- **Desktop app** — native app with React UI, 5 themes (light/dark), system tray, and desktop notifications
 
 ## Security
 
@@ -198,7 +202,7 @@ pnpm typecheck        # TypeScript type check
 pnpm test             # Unit tests (Vitest)
 ```
 
-### Desktop App (Tauri)
+### Desktop App
 
 ```bash
 cd packages/tauri
@@ -206,7 +210,7 @@ pnpm tauri:dev        # Dev mode (builds sidecar + launches Tauri)
 pnpm tauri:build      # Production build → .dmg/.deb/.AppImage/.msi
 ```
 
-Cross-platform builds run via [GitHub Actions](.github/workflows/tauri-build.yml).
+Cross-platform builds run via [GitHub Actions](.github/workflows/tauri-build.yml) on `desktop-v*` tags.
 
 ## Roadmap
 

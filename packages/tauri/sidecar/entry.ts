@@ -860,7 +860,7 @@ function startAutopilot(state: SidecarState, mode: AutopilotMode, intervalMs: nu
     if (!trigger) return;
 
     debug("Autopilot: running tick");
-    void handleChat(state, trigger);
+    void handleAutopilotTick(state, trigger);
   }, intervalMs);
 }
 
@@ -930,6 +930,52 @@ function startLogWatcher(agentName: string): void {
       // File may not exist yet — that's fine
     }
   }, 5_000);
+}
+
+// ── Autopilot tick — isolated context (matches daemon pattern) ──
+
+async function handleAutopilotTick(state: SidecarState, trigger: string): Promise<void> {
+  if (busy) return; // silently skip — don't queue ticks
+
+  busy = true;
+  try {
+    // Fresh context per tick — no history accumulation
+    const tickMessages: CoreMessage[] = [{ role: "user" as const, content: trigger }];
+
+    const callbacks: AgentLoopCallbacks = {
+      onTextChunk: (chunk) => send({ type: "chunk", text: chunk }),
+      onToolCallStart: (toolName) => send({ type: "tool:start", toolName }),
+      onToolCallEnd: (toolName) => send({ type: "tool:end", toolName }),
+    };
+
+    debug(`Running autopilot tick...`);
+
+    const result = await runAgentTurn(
+      tickMessages,
+      state.skillContext,
+      state.tradingContext,
+      state.walletContext,
+      state.rewardsContext,
+      state.onboardingContext,
+      state.apiContext,
+      { ...state.profile, autopilotMode },
+      callbacks,
+      state.memoryContent,
+      null,
+    );
+
+    // Do NOT append to state.coreMessages — tick is isolated
+    // Do NOT save session — tick results are ephemeral
+
+    send({ type: "turn:done", text: result.text });
+    debug("Autopilot tick complete.");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error during autopilot tick";
+    debug(`Autopilot tick error: ${message}`);
+    send({ type: "turn:error", message });
+  } finally {
+    busy = false;
+  }
 }
 
 async function handleChat(state: SidecarState, message: string): Promise<void> {

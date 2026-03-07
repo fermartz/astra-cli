@@ -380,7 +380,7 @@ function App() {
           {/* Messages */}
           {messages.map((msg, i) => {
             const prev = i > 0 ? messages[i - 1] : null;
-            const isFollowUp = prev?.role === msg.role;
+            const isFollowUp = prev?.role === msg.role && !msg.systemIcon && !prev?.systemIcon;
             return (
               <ChatMessage
                 key={i}
