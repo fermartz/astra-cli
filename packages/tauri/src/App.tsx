@@ -8,7 +8,7 @@ import { ThemeSwitcher } from "@/components/theme-switcher";
 import { ChatMessage } from "@/components/chat-message";
 import { Onboarding } from "@/components/onboarding";
 import { StatusBar } from "@/components/status-bar";
-import { AgentSwitcher } from "@/components/agent-switcher";
+// import { AgentSwitcher } from "@/components/agent-switcher";
 import { useTheme } from "@/hooks/use-theme";
 import { useSidecar } from "@/hooks/use-sidecar";
 import MarkdownText from "@/components/markdown-text";
@@ -83,9 +83,9 @@ function App() {
     onboardingData,
     marketData,
     portfolioData,
-    agentsList,
-    requestAgentsList,
-    switchAgent,
+    // agentsList,
+    // requestAgentsList,
+    // switchAgent,
     autopilotState,
     autopilotReport,
     setAutopilot,
