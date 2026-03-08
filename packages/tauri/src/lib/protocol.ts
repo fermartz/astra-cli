@@ -372,6 +372,11 @@ export interface StatusUpdateResponse {
   portfolio: PortfolioData | null;
 }
 
+export interface FunFactShowResponse {
+  type: "funfact:show";
+  text: string;
+}
+
 export type SidecarResponse =
   | InitOkResponse
   | InitErrorResponse
@@ -409,4 +414,5 @@ export type SidecarResponse =
   | ModelSwitchedResponse
   | DaemonStateResponse
   | DaemonTradeResponse
-  | DaemonErrorResponse;
+  | DaemonErrorResponse
+  | FunFactShowResponse;

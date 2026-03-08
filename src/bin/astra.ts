@@ -360,34 +360,37 @@ async function main(): Promise<void> {
   // Step 7: Welcome-back fetch (AstraNova returning users)
   // Done BEFORE Ink mounts so messages are ready on first render — no async height changes.
   let apiStatus: import("../onboarding/welcome-back.js").AgentStatus | null = null;
+  let autoGreeting = false;
   if (isReturning && isAstraNova) {
     process.stdout.write("  Loading...\r");
     apiStatus = await fetchAgentStatus(agentName);
     process.stdout.write("             \r"); // clear the loading text
 
-    const greeting = randomGreeting();
     const welcomeMessages: Array<{ role: string; content: string }> = [];
+    let autoGreeting = false;
 
     if (!apiStatus) {
+      // Offline — static fallback, no LLM greeting possible
       welcomeMessages.push(
-        { role: "assistant", content: greeting },
+        { role: "assistant", content: randomGreeting() },
         { role: "assistant", content: "Could not reach the API. Launching in offline mode." },
       );
     } else {
       const statusLine = `Agent **"${apiStatus.name}"** — ${apiStatus.status}`;
       if (apiStatus.status === "pending_verification") {
+        // Pending — keep static greeting + verification reminder (exact format needed)
         const reminder = buildVerificationReminder(apiStatus.name, apiStatus.verificationCode);
         welcomeMessages.push(
-          { role: "assistant", content: greeting },
+          { role: "assistant", content: randomGreeting() },
           { role: "assistant", content: statusLine },
           { role: "assistant", content: reminder },
         );
       } else {
-        const tip = journeyTip(apiStatus);
+        // Verified+ — show status line, let LLM generate the greeting
         welcomeMessages.push(
-          { role: "assistant", content: greeting },
-          { role: "assistant", content: `${statusLine}\n\n${tip}` },
+          { role: "assistant", content: statusLine },
         );
+        autoGreeting = true;
       }
 
       // Refine profile with real API status
@@ -437,6 +440,7 @@ async function main(): Promise<void> {
         debug,
         pluginMap,
         isReturning: false,
+        autoGreeting,
       }),
     ),
   );

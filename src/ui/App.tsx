@@ -75,6 +75,8 @@ interface AppProps {
   isOnboarding?: boolean;
   needsRegistration?: boolean;
   isReturning?: boolean;
+  /** Auto-trigger LLM greeting on mount (replaces static randomGreeting/journeyTip) */
+  autoGreeting?: boolean;
   onOnboardingComplete?: (result: {
     agentName: string;
     verificationCode: string;
@@ -103,6 +105,7 @@ export default function App({
   isOnboarding,
   needsRegistration,
   isReturning,
+  autoGreeting,
   onOnboardingComplete,
 }: AppProps): React.JSX.Element {
   const { exit } = useApp();
@@ -145,6 +148,9 @@ export default function App({
   const [validatingKey, setValidatingKey] = useState(false);
   // OAuth PKCE verifier stored while waiting for callback/paste
   const oauthVerifierRef = useRef<string | null>(null);
+
+  // Fun fact ticker
+  const [funFact, setFunFact] = useState<string | undefined>(undefined);
 
   // Autopilot state
   const [autopilotMode, setAutopilotMode] = useState(initialAutopilotConfig?.mode ?? "off");
@@ -1265,6 +1271,82 @@ export default function App({
     [sendMessage],
   );
 
+  // Auto-trigger LLM greeting on mount (replaces static randomGreeting/journeyTip).
+  // The system prompt has "Your Opening Message" instructions per journey stage —
+  // we just need to trigger a turn so the LLM generates a natural, varied greeting.
+  const greetingFired = useRef(false);
+  useEffect(() => {
+    if (!autoGreeting || greetingFired.current || onboardingPhase) return;
+    greetingFired.current = true;
+
+    const triggerGreeting = async () => {
+      const greetingTrigger: CoreMessage[] = [
+        { role: "user", content: "hey" },
+      ];
+
+      setIsLoading(true);
+      setStreamingText("");
+
+      try {
+        const result = await runAgentTurn(
+          greetingTrigger,
+          skillContext,
+          tradingContext,
+          walletContext,
+          rewardsContext,
+          onboardingContext,
+          apiContext,
+          { ...profile, autopilotMode },
+          {
+            onTextChunk: (chunk) => {
+              setStreamingText((prev) => (prev ?? "") + chunk);
+            },
+            onToolCallStart: (name) => { setToolName(name); },
+            onToolCallEnd: () => { setToolName(undefined); },
+          },
+          memoryContent,
+          pluginMap,
+        );
+
+        const updatedCore = [...greetingTrigger, ...result.responseMessages];
+        setCoreMessages(updatedCore);
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "assistant" as const, content: result.text },
+        ]);
+        setStreamingText(undefined);
+      } catch {
+        // Fallback to static greeting on LLM failure
+        setChatMessages((prev) => [
+          ...prev,
+          { role: "assistant" as const, content: "Welcome back! What are we doing today?" },
+        ]);
+        setStreamingText(undefined);
+      } finally {
+        setIsLoading(false);
+        setToolName(undefined);
+      }
+    };
+
+    void triggerGreeting();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fun fact ticker — generate a fact every 2 minutes, show dimmed for 20s
+  useEffect(() => {
+    if (onboardingPhase) return;
+    const timer = setInterval(async () => {
+      const { generateFunFact } = await import("../agent/fun-facts.js");
+      const fact = await generateFunFact();
+      if (fact) {
+        setFunFact(fact);
+        setTimeout(() => setFunFact(undefined), 20_000);
+      }
+    }, 2 * 60 * 1000);
+    return () => clearInterval(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Determine if input should be active
   const inputActive = !isLoading && !validatingKey &&
     onboardingPhase !== "registering" &&
@@ -1297,6 +1379,7 @@ export default function App({
           autopilotIntervalMs={autopilotIntervalMs}
           onEpochChange={handleEpochChange}
           pluginMap={pluginMap}
+          funFact={funFact}
         />
       </Box>
 

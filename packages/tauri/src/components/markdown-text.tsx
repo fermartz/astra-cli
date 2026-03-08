@@ -104,6 +104,26 @@ export default function MarkdownText({ children }: MarkdownTextProps): React.JSX
         continue;
       }
 
+      // Blockquote: > text
+      if (line.startsWith("> ") || line === ">") {
+        const quoteLines: string[] = [];
+        while (i < lines.length && (lines[i]!.startsWith("> ") || lines[i] === ">")) {
+          quoteLines.push(lines[i]!.slice(2));
+          i++;
+        }
+        result.push(
+          <div
+            key={result.length}
+            className="border-l-2 border-muted-foreground/30 pl-3 my-1 text-muted-foreground text-sm italic"
+          >
+            {quoteLines.map((ql, idx) => (
+              <div key={idx}>{ql.trim() === "" ? <div className="h-2" /> : renderInline(ql)}</div>
+            ))}
+          </div>,
+        );
+        continue;
+      }
+
       // Empty line
       if (line.trim() === "") {
         result.push(<div key={result.length} className="h-2" />);

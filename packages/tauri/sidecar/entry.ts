@@ -136,6 +136,7 @@ interface SidecarState {
   memoryContent: string;
   coreMessages: CoreMessage[];
   sessionId: string;
+  autoGreeting: boolean;
 }
 
 // ── Init sequence ──
@@ -202,23 +203,25 @@ async function initialize(): Promise<SidecarState | null> {
   // Build welcome messages
   const welcomeMessages: Array<{ role: "assistant"; content: string }> = [];
 
+  let autoGreeting = false;
+
   if (apiStatus) {
-    const greeting = randomGreeting();
     const statusLine = `Agent **"${apiStatus.name}"** — ${apiStatus.status}`;
 
     if (apiStatus.status === "pending_verification") {
+      // Pending — keep static greeting + verification reminder (exact format needed)
       const reminder = buildVerificationReminder(apiStatus.name, apiStatus.verificationCode);
       welcomeMessages.push(
-        { role: "assistant", content: greeting },
+        { role: "assistant", content: randomGreeting() },
         { role: "assistant", content: statusLine },
         { role: "assistant", content: reminder },
       );
     } else {
-      const tip = journeyTip(apiStatus);
+      // Verified+ — show status line, let LLM generate the greeting
       welcomeMessages.push(
-        { role: "assistant", content: greeting },
-        { role: "assistant", content: `${statusLine}\n\n${tip}` },
+        { role: "assistant", content: statusLine },
       );
+      autoGreeting = true;
     }
 
     updateAgentState(agentName, {
@@ -286,6 +289,7 @@ async function initialize(): Promise<SidecarState | null> {
     memoryContent,
     coreMessages,
     sessionId,
+    autoGreeting,
   };
 }
 
@@ -584,6 +588,28 @@ function startStatusPolling(state: SidecarState): void {
   debug("Starting status polling (60s interval)");
   void fetchStatusData(state.agentName);
   statusPollTimer = setInterval(() => void fetchStatusData(state.agentName), STATUS_POLL_MS);
+}
+
+// ── Fun fact timer ──
+
+const FUN_FACT_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes
+let funFactTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopFunFactTimer(): void {
+  if (funFactTimer) {
+    clearInterval(funFactTimer);
+    funFactTimer = null;
+  }
+}
+
+function startFunFactTimer(): void {
+  stopFunFactTimer();
+  debug("Starting fun fact timer (2min interval)");
+  funFactTimer = setInterval(async () => {
+    const { generateFunFact } = await import("../../../src/agent/fun-facts.js");
+    const fact = await generateFunFact();
+    if (fact) send({ type: "funfact:show" as const, text: fact });
+  }, FUN_FACT_INTERVAL_MS);
 }
 
 // ── Model switch handler ──
@@ -1048,13 +1074,61 @@ async function handleChat(state: SidecarState, message: string): Promise<void> {
   }
 }
 
+// ── Auto-greeting ──
+
+async function triggerGreeting(state: SidecarState): Promise<void> {
+  busy = true;
+  try {
+    const greetingTrigger: CoreMessage[] = [
+      { role: "user" as const, content: "hey" },
+    ];
+
+    const callbacks: AgentLoopCallbacks = {
+      onTextChunk: (chunk) => send({ type: "chunk", text: chunk }),
+      onToolCallStart: (toolName) => send({ type: "tool:start", toolName }),
+      onToolCallEnd: (toolName) => send({ type: "tool:end", toolName }),
+    };
+
+    const result = await runAgentTurn(
+      greetingTrigger,
+      state.skillContext,
+      state.tradingContext,
+      state.walletContext,
+      state.rewardsContext,
+      state.onboardingContext,
+      state.apiContext,
+      { ...state.profile, autopilotMode },
+      callbacks,
+      state.memoryContent,
+      null,
+    );
+
+    state.coreMessages = [...greetingTrigger, ...result.responseMessages];
+    send({ type: "turn:done", text: result.text });
+    debug("LLM greeting complete.");
+  } catch (err) {
+    // LLM failed — fall back to static greeting
+    debug(`LLM greeting failed: ${err instanceof Error ? err.message : String(err)}`);
+    send({ type: "turn:done", text: `${randomGreeting()} ${journeyTip(state.profile.journeyStage)}` });
+  } finally {
+    busy = false;
+  }
+}
+
 // ── Chat loop ──
 
 function startChatLoop(state: SidecarState): void {
   let buffer = "";
 
-  // Start market/portfolio polling
+  // Start market/portfolio polling + fun fact timer
   startStatusPolling(state);
+  startFunFactTimer();
+
+  // Auto-trigger LLM greeting for verified+ agents
+  if (state.autoGreeting) {
+    debug("Auto-triggering LLM greeting...");
+    void triggerGreeting(state);
+  }
 
   // Remove existing stdin listeners (from onboarding) before adding chat handler
   process.stdin.removeAllListeners("data");
@@ -1105,10 +1179,12 @@ function startChatLoop(state: SidecarState): void {
         debug(`Switching to agent: ${msg.agentName}`);
         setActiveAgent(msg.agentName);
         stopStatusPolling();
+        stopFunFactTimer();
         const newState = await initialize();
         if (newState) {
           Object.assign(state, newState);
           startStatusPolling(state);
+          startFunFactTimer();
         }
         break;
       }

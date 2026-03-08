@@ -16,6 +16,7 @@ interface StatusBarProps {
   autopilotIntervalMs?: number;
   onEpochChange?: (epochId: number) => void;
   pluginMap?: PluginMap | null;
+  funFact?: string;
 }
 
 interface MarketState {
@@ -48,6 +49,7 @@ const StatusBar = React.memo(function StatusBar({
   autopilotIntervalMs = 300_000,
   onEpochChange,
   pluginMap,
+  funFact,
 }: StatusBarProps): React.JSX.Element {
   // Single state object to batch market + portfolio updates into one render
   const [data, setData] = useState<BarData>({ market: null, portfolio: null });
@@ -191,6 +193,9 @@ const StatusBar = React.memo(function StatusBar({
           <Text color="#00ff00">AP: ● {autopilotMode.toUpperCase()} {formatInterval(autopilotIntervalMs)}</Text>
         )}
       </Box>
+      <Box paddingX={1} marginTop={1}>
+        <Text dimColor>{funFact ? stripMarkdown(funFact) : " "}</Text>
+      </Box>
     </Box>
   );
 });
@@ -198,6 +203,15 @@ const StatusBar = React.memo(function StatusBar({
 export default StatusBar;
 
 // ─── Formatting ────────────────────────────────────────────────────────
+
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/_(.+?)_/g, "$1")
+    .replace(/`(.+?)`/g, "$1");
+}
 
 function formatPrice(price: number): string {
   if (price >= 1) return price.toFixed(2);

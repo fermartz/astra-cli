@@ -55,6 +55,15 @@ function formatIntervalMs(ms: number): string {
   return `${Math.round(ms / 60_000)}m`;
 }
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/_(.+?)_/g, "$1")
+    .replace(/`(.+?)`/g, "$1");
+}
+
 function App() {
   const [input, setInput] = useState("");
   const { theme, mode, setTheme, toggleMode } = useTheme();
@@ -94,6 +103,7 @@ function App() {
     daemonRunning,
     startDaemon,
     stopDaemon,
+    funFact,
   } = useSidecar();
 
   // Error dismissal
@@ -318,23 +328,30 @@ function App() {
     <div className="flex flex-col h-screen bg-background text-foreground">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-4 border-b border-border">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           <BrandLogo size={40} />
-          <h1 className="text-lg font-semibold tracking-tight">Astra</h1>
-          <AgentSwitcher
+          <h1 className="text-lg font-semibold tracking-tight shrink-0">Astra</h1>
+          {/* <AgentSwitcher
             currentAgent={agentName}
             agents={agentsList}
             onRequestList={requestAgentsList}
             onSwitch={switchAgent}
             disabled={status === "streaming" || status === "connecting" || status === "onboarding"}
+          /> */}
+          {funFact && (
+            <span className="text-xs text-muted-foreground truncate">
+              {stripMarkdown(funFact)}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-4 shrink-0">
+          <ThemeSwitcher
+            theme={theme}
+            mode={mode}
+            onThemeChange={setTheme}
+            onToggleMode={toggleMode}
           />
         </div>
-        <ThemeSwitcher
-          theme={theme}
-          mode={mode}
-          onThemeChange={setTheme}
-          onToggleMode={toggleMode}
-        />
       </div>
 
       {/* Onboarding view */}

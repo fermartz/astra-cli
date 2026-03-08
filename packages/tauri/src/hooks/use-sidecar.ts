@@ -84,6 +84,10 @@ export function useSidecar() {
   // Daemon (full autopilot)
   const [daemonRunning, setDaemonRunning] = useState(false);
 
+  // Fun fact ticker
+  const [funFact, setFunFact] = useState<string | null>(null);
+  const funFactTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Ref for streaming accumulation (avoids stale closure issues)
   const streamRef = useRef("");
 
@@ -303,6 +307,12 @@ export function useSidecar() {
           content: msg.message,
           systemIcon: "error",
         }]);
+        break;
+
+      case "funfact:show":
+        if (funFactTimeout.current) clearTimeout(funFactTimeout.current);
+        setFunFact(msg.text);
+        funFactTimeout.current = setTimeout(() => setFunFact(null), 20_000);
         break;
 
       case "pong":
@@ -601,5 +611,6 @@ export function useSidecar() {
     startDaemon,
     stopDaemon,
     requestDaemonStatus,
+    funFact,
   };
 }
