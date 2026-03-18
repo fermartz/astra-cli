@@ -7,7 +7,7 @@ const CATEGORIES = [
   "Cosmic fact — astronomy, physics, space phenomena",
   "Space history — missions, discoveries, milestones",
   "Market fact — trading history, market psychology, financial milestones",
-  "Crypto fact — blockchain history, culture, notable events",
+  "Crypto fact — blockchain events, culture, or milestones from the last 5 years (2021-2026)",
   "Word origin — etymology related to astronomy, science, or trading",
 ];
 

@@ -566,7 +566,11 @@ async function fetchStatusData(agentName: string): Promise<void> {
     }
 
     if (market || portfolio) {
-      send({ type: "status:update", market, portfolio });
+      // Include fresh journeyStage from state.json (picks up mid-session verification changes)
+      const currentState = loadState();
+      const plugin = getActivePlugin();
+      const journeyStage = currentState?.agents[plugin]?.[agentName]?.journeyStage;
+      send({ type: "status:update", market, portfolio, journeyStage });
     }
   } catch (err) {
     debug(`Status poll error: ${err instanceof Error ? err.message : String(err)}`);

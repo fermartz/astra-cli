@@ -64,6 +64,8 @@ export function useSidecar() {
 
   // Onboarding state
   const [onboardingPhase, setOnboardingPhase] = useState<OnboardingPhase | null>(null);
+  const onboardingPhaseRef = useRef<OnboardingPhase | null>(null);
+  useEffect(() => { onboardingPhaseRef.current = onboardingPhase; }, [onboardingPhase]);
   const [onboardingData, setOnboardingData] = useState<OnboardingData>({});
 
   // Status bar data
@@ -72,6 +74,13 @@ export function useSidecar() {
 
   // Agent management
   const [agentsList, setAgentsList] = useState<AgentInfo[]>([]);
+  const [agentRegisterResult, setAgentRegisterResult] = useState<{
+    success: boolean;
+    agentName?: string;
+    verificationCode?: string;
+    error?: string;
+    nameConflict?: boolean;
+  } | null>(null);
 
   // Model switch
   const [modelSwitchPhase, setModelSwitchPhase] = useState<ModelSwitchPhase>("idle");
@@ -177,16 +186,23 @@ export function useSidecar() {
       case "status:update":
         if (msg.market) setMarketData(msg.market);
         if (msg.portfolio) setPortfolioData(msg.portfolio);
+        if (msg.journeyStage) setJourneyStage(msg.journeyStage);
         break;
 
       case "agents:list":
         setAgentsList(msg.agents);
         break;
 
-      case "agents:switch-error":
-        setError(msg.message);
+      case "agents:switch-error": {
+        const names = msg.availableAgents.map((a: string) => "`" + a + "`").join(", ");
+        setMessages((prev) => [...prev, {
+          role: "assistant" as const,
+          content: `${msg.message}\n\nAvailable agents: ${names}`,
+          systemIcon: "error" as const,
+        }]);
         setStatus("ready");
         break;
+      }
 
       case "strategy:content":
         strategyReadCb.current?.(msg.content);
@@ -377,22 +393,42 @@ export function useSidecar() {
         break;
 
       case "onboard:registered":
-        setOnboardingPhase("done");
-        setOnboardingData((prev) => ({
-          ...prev,
-          registeredAgent: msg.agentName,
-          verificationCode: msg.verificationCode,
-        }));
+        if (onboardingPhaseRef.current) {
+          // During onboarding flow
+          setOnboardingPhase("done");
+          setOnboardingData((prev) => ({
+            ...prev,
+            registeredAgent: msg.agentName,
+            verificationCode: msg.verificationCode,
+          }));
+        } else {
+          // From /agent new in chat — notify App.tsx via agentRegisterResult
+          setAgentRegisterResult({
+            success: true,
+            agentName: msg.agentName,
+            verificationCode: msg.verificationCode,
+          });
+        }
         // init:ok will follow — transitions to chat automatically
         break;
 
       case "onboard:register-error":
-        setOnboardingPhase("details");
-        setOnboardingData((prev) => ({
-          ...prev,
-          registerError: msg.message,
-          nameConflict: msg.nameConflict,
-        }));
+        if (onboardingPhaseRef.current) {
+          // During onboarding flow
+          setOnboardingPhase("details");
+          setOnboardingData((prev) => ({
+            ...prev,
+            registerError: msg.message,
+            nameConflict: msg.nameConflict,
+          }));
+        } else {
+          // From /agent new in chat
+          setAgentRegisterResult({
+            success: false,
+            error: msg.message,
+            nameConflict: msg.nameConflict,
+          });
+        }
         break;
     }
   }, []);
@@ -572,6 +608,13 @@ export function useSidecar() {
     await invoke("send_to_sidecar", { message: JSON.stringify(request) });
   }, []);
 
+  // Register a new agent (reuses onboard:register protocol)
+  const registerAgent = useCallback(async (name: string, description: string) => {
+    setAgentRegisterResult(null);
+    const request: SidecarRequest = { type: "onboard:register", agentName: name, description };
+    await invoke("send_to_sidecar", { message: JSON.stringify(request) });
+  }, []);
+
   return {
     status,
     plugin,
@@ -590,6 +633,9 @@ export function useSidecar() {
     agentsList,
     requestAgentsList,
     switchAgent,
+    registerAgent,
+    agentRegisterResult,
+    setAgentRegisterResult,
     addLocalMessage,
     addUserMessage,
     clearMessages,

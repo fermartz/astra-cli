@@ -7,9 +7,10 @@ interface StatusBarProps {
   status: string;
   pluginName: string | null;
   agentName: string | null;
+  journeyStage: string | null;
 }
 
-export function StatusBar({ market, portfolio, activeToolName, status, pluginName, agentName }: StatusBarProps) {
+export function StatusBar({ market, portfolio, activeToolName, status, pluginName, agentName, journeyStage }: StatusBarProps) {
   const activityText = activeToolName
     ? `Running: ${activeToolName}...`
     : status === "streaming"
@@ -36,6 +37,13 @@ export function StatusBar({ market, portfolio, activeToolName, status, pluginNam
             <>
               <Pipe />
               <span className="text-orange-400">{agentName}</span>
+            </>
+          )}
+
+          {(journeyStage === "fresh" || journeyStage === "pending") && (
+            <>
+              <Pipe />
+              <span className="text-yellow-400">pending verification</span>
             </>
           )}
 
@@ -90,7 +98,7 @@ export function StatusBar({ market, portfolio, activeToolName, status, pluginNam
       {/* Command hints */}
       <div className="flex items-center justify-between px-4 pb-1.5 text-[11px] text-muted-foreground/50">
         <span>/help · /portfolio · /market · /buy · /sell</span>
-        <span>/strategy · /auto on·off·set · /model · /clear</span>
+        <span>/strategy · /auto on·off·set · /agent · /model · /clear</span>
       </div>
     </div>
   );

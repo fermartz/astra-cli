@@ -8,7 +8,7 @@ import ErrorBoundary from "./ErrorBoundary.js";
 import Input from "./Input.js";
 import Spinner from "./Spinner.js";
 import { runAgentTurn } from "../agent/loop.js";
-import { isRestartRequested, loadConfig, saveConfig, saveAutopilotConfig, loadEpochBudget, saveEpochBudget, appendAutopilotLog, loadAutopilotLogSince, requestPluginsPicker } from "../config/store.js";
+import { isRestartRequested, loadConfig, saveConfig, saveAutopilotConfig, loadEpochBudget, saveEpochBudget, appendAutopilotLog, loadAutopilotLogSince, requestPluginsPicker, listAgents, loadState, loadCredentials, getActiveAgent, setActiveAgent, requestRestart } from "../config/store.js";
 import { validateApiKey, DEFAULT_MODELS, openBrowser, PROVIDER_OPTIONS, API_KEY_LABELS, API_KEY_PLACEHOLDERS } from "../onboarding/provider.js";
 import {
   generatePkce,
@@ -148,6 +148,9 @@ export default function App({
   const [validatingKey, setValidatingKey] = useState(false);
   // OAuth PKCE verifier stored while waiting for callback/paste
   const oauthVerifierRef = useRef<string | null>(null);
+
+  // /agent new — multi-step flow state
+  const [agentNewPhase, setAgentNewPhase] = useState<null | "description" | "agent-name" | "registering">(null);
 
   // Fun fact ticker
   const [funFact, setFunFact] = useState<string | undefined>(undefined);
@@ -736,6 +739,94 @@ export default function App({
         }
       }
 
+      // ── /agent new — multi-step flow (description → name → register) ────
+      if (agentNewPhase) {
+        const trimmed = userText.trim();
+        if (!trimmed) return;
+
+        // Allow cancelling via any slash command
+        if (trimmed.startsWith("/")) {
+          setAgentNewPhase(null);
+          // Fall through to normal slash command handling below
+        } else if (agentNewPhase === "description") {
+          setChatMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+          const num = parseInt(trimmed, 10);
+          const suggestions = onboardingDataRef.current.descriptionSuggestions as string[] | undefined;
+          let description: string;
+          if (num >= 1 && num <= 3 && suggestions && suggestions[num - 1]) {
+            description = suggestions[num - 1];
+          } else {
+            description = trimmed;
+          }
+          onboardingDataRef.current.description = description;
+          setChatMessages((prev) => [...prev, { role: "assistant", content: `Personality: **${description}**` }]);
+
+          // Move to name phase
+          const nameSuggestions = pickRandomNames(3);
+          onboardingDataRef.current.nameSuggestions = nameSuggestions;
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `**Choose a name** — or type your own (2-32 chars, lowercase, hyphens ok):\n\n  1) \`${nameSuggestions[0]}\`\n  2) \`${nameSuggestions[1]}\`\n  3) \`${nameSuggestions[2]}\`` },
+          ]);
+          setAgentNewPhase("agent-name");
+          return;
+        } else if (agentNewPhase === "agent-name") {
+          setChatMessages((prev) => [...prev, { role: "user", content: trimmed }]);
+          const num = parseInt(trimmed, 10);
+          const suggestions = onboardingDataRef.current.nameSuggestions as string[] | undefined;
+          let name: string;
+          if (num >= 1 && num <= 3 && suggestions && suggestions[num - 1]) {
+            name = suggestions[num - 1];
+          } else {
+            name = trimmed.toLowerCase();
+          }
+
+          const validationError = validateAgentName(name);
+          if (validationError) {
+            setChatMessages((prev) => [...prev, { role: "assistant", content: `${validationError}\n\nType a valid name (2-32 chars, lowercase letters, numbers, hyphens, underscores).` }]);
+            return;
+          }
+
+          setChatMessages((prev) => [...prev, { role: "assistant", content: `Registering agent **"${name}"**...` }]);
+          setAgentNewPhase("registering");
+
+          // Stop current agent's daemon before registering
+          const currentAgent = getActiveAgent();
+          if (currentAgent) {
+            stopDaemon(currentAgent);
+          }
+
+          const description = onboardingDataRef.current.description as string;
+          const regResult = await registerAgentApi(name, description);
+
+          if (!regResult.ok) {
+            if (regResult.status === 409) {
+              setChatMessages((prev) => [...prev, { role: "assistant", content: `**"${name}"** is already taken. Pick a different name or type your own.` }]);
+              setAgentNewPhase("agent-name");
+            } else if (regResult.status === 429) {
+              setChatMessages((prev) => [...prev, { role: "assistant", content: "Too many registration attempts. Try again later." }]);
+              setAgentNewPhase(null);
+            } else {
+              setChatMessages((prev) => [...prev, { role: "assistant", content: `Registration failed: ${regResult.error}\n\nTry a different name.` }]);
+              setAgentNewPhase("agent-name");
+            }
+            return;
+          }
+
+          // Success — restart to load new agent context
+          const verCode = regResult.verificationCode;
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "assistant", content: `Agent **"${regResult.agentName}"** registered!${verCode ? `\n\nVerification code: \`${verCode}\`` : ""}\n\nRestarting...` },
+          ]);
+          requestRestart();
+          setTimeout(() => exit(), 1500);
+          return;
+        }
+        // "registering" phase — ignore input while API call is in progress
+        return;
+      }
+
       // ── Slash commands (handled locally, never sent to LLM) ────
       if (userText.startsWith("/")) {
         const parts = userText.trim().split(/\s+/);
@@ -1081,6 +1172,118 @@ export default function App({
           // Fall through to LLM — user message already added above
         }
 
+        // ── /agent — list, switch, or create agents ────
+        if (cmd === "/agent") {
+          const sub = parts[1]?.toLowerCase();
+
+          if (!sub || sub === "list") {
+            // Show current agent + all agents
+            const agents = listAgents();
+            const active = getActiveAgent();
+            const state = loadState();
+            const manifest = getActiveManifest();
+            const pluginId = state?.activePlugin ?? "astranova";
+
+            if (agents.length === 0) {
+              setChatMessages((prev) => [
+                ...prev,
+                { role: "user", content: userText },
+                { role: "assistant", content: "No agents registered. Use `/agent new` to create one." },
+              ]);
+              return;
+            }
+
+            const lines = agents.map((name) => {
+              const isActive = name === active;
+              const agentState = state?.agents[pluginId]?.[name];
+              const status = agentState?.status ?? "unknown";
+              const stage = agentState?.journeyStage ?? "";
+              const marker = isActive ? " ← active" : "";
+              return `  \`${name}\` — ${status}${stage ? ` · ${stage}` : ""}${marker}`;
+            });
+
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `**Agents** (${manifest.name}):\n\n${lines.join("\n")}\n\n\`/agent switch <name>\` · \`/agent new\`` },
+            ]);
+            return;
+          }
+
+          if (sub === "switch") {
+            const targetName = parts[2]?.toLowerCase();
+            if (!targetName) {
+              setChatMessages((prev) => [
+                ...prev,
+                { role: "user", content: userText },
+                { role: "assistant", content: "Usage: `/agent switch <name>`\n\nType `/agent list` to see available agents." },
+              ]);
+              return;
+            }
+
+            const currentAgent = getActiveAgent();
+            if (currentAgent === targetName) {
+              setChatMessages((prev) => [
+                ...prev,
+                { role: "user", content: userText },
+                { role: "assistant", content: `**"${targetName}"** is already the active agent.` },
+              ]);
+              return;
+            }
+
+            const creds = loadCredentials(targetName);
+            if (!creds) {
+              const available = listAgents();
+              const hint = available.length > 0
+                ? `Available agents: ${available.map((a) => `\`${a}\``).join(", ")}`
+                : "No agents registered. Use `/agent new` to create one.";
+              setChatMessages((prev) => [
+                ...prev,
+                { role: "user", content: userText },
+                { role: "assistant", content: `No agent named **"${targetName}"** found.\n\n${hint}` },
+              ]);
+              return;
+            }
+
+            // Stop current daemon and switch
+            if (currentAgent) {
+              stopDaemon(currentAgent);
+            }
+            setActiveAgent(targetName);
+            requestRestart();
+
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `Switching to **"${targetName}"**. Restarting...` },
+            ]);
+            setTimeout(() => exit(), 1500);
+            return;
+          }
+
+          if (sub === "new") {
+            // Start multi-step flow: description → name → register
+            const descSuggestions = pickRandomDescriptions(3);
+            onboardingDataRef.current.descriptionSuggestions = descSuggestions;
+
+            setChatMessages((prev) => [
+              ...prev,
+              { role: "user", content: userText },
+              { role: "assistant", content: `**Pick a personality** — or type your own:\n\n  1) ${descSuggestions[0]}\n  2) ${descSuggestions[1]}\n  3) ${descSuggestions[2]}` },
+            ]);
+            setAgentNewPhase("description");
+            return;
+          }
+
+          // Unknown subcommand
+          setChatMessages((prev) => [
+            ...prev,
+            { role: "user", content: userText },
+            { role: "assistant", content: `Unknown subcommand: \`${sub}\`\n\n  \`/agent\`              — List agents\n  \`/agent switch <name>\` — Switch agent\n  \`/agent new\`           — Create new agent` },
+          ]);
+          return;
+        }
+
         if (cmd === "/help" || cmd === "/?") {
           const helpLines: string[] = [];
 
@@ -1120,6 +1323,7 @@ export default function App({
           helpLines.push(
             "**System**",
             "",
+            "  `/agent`     — List, switch, or create agents",
             "  `/model`     — Show or switch LLM provider",
             "  `/help`      — Show this help",
             "  `/exit`      — Exit (also `/quit`, `/q`)",
@@ -1259,7 +1463,7 @@ export default function App({
         setToolName(undefined);
       }
     },
-    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry, pluginMap, hasAutopilot, hasJourneyStages, exit, debug, runAutopilotTurn, awaitingApiKey, onboardingPhase, handleOnboardingInput],
+    [coreMessages, chatMessages, skillContext, tradingContext, walletContext, rewardsContext, onboardingContext, apiContext, profile, autopilotMode, agentName, sessionId, memoryContent, addLogEntry, pluginMap, hasAutopilot, hasJourneyStages, exit, debug, runAutopilotTurn, awaitingApiKey, onboardingPhase, handleOnboardingInput, agentNewPhase],
   );
   // Keep ref in sync so the autopilot timer always has the latest sendMessage
   useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);

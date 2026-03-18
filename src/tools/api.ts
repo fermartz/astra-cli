@@ -9,6 +9,7 @@ import {
   clearPendingClaim,
   loadEpochBudget,
   saveEpochBudget,
+  updateAgentState,
 } from "../config/store.js";
 import { getActiveManifest } from "../domain/plugin.js";
 
@@ -197,6 +198,19 @@ export const apiCallTool = tool({
     // Auto-track board post flag
     if (method === "POST" && path === "/api/v1/board" && agentName) {
       markBoardPosted(agentName);
+    }
+
+    // Update local state when verification succeeds
+    if (method === "POST" && path === "/api/v1/agents/me/verify" && agentName) {
+      const data = result.data as Record<string, unknown>;
+      const agentObj = data.agent as Record<string, unknown> | undefined;
+      const verifiedStatus = agentObj?.status ?? data.status;
+      if (verifiedStatus === "active") {
+        updateAgentState(agentName, {
+          status: "active",
+          journeyStage: "verified",
+        });
+      }
     }
 
     // Track trade executions against epoch budget (buy/sell only)

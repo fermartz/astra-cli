@@ -370,6 +370,7 @@ export interface StatusUpdateResponse {
   type: "status:update";
   market: MarketData | null;
   portfolio: PortfolioData | null;
+  journeyStage?: string;
 }
 
 export interface FunFactShowResponse {

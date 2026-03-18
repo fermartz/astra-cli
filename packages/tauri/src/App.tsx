@@ -39,6 +39,7 @@ const HELP_TEXT = `**Available Commands**
 - \`/auto report\` — Show autopilot trade log
 
 **System**
+- \`/agent\` — List, switch, or create agents
 - \`/model [provider]\` — Switch LLM provider (claude, openai, gemini, codex)
 - \`/help\` — Show this help
 - \`/clear\` — Clear chat history`;
@@ -71,6 +72,7 @@ function App() {
     status,
     plugin,
     agentName,
+    journeyStage,
     messages,
     streamingText,
     activeToolName,
@@ -83,9 +85,12 @@ function App() {
     onboardingData,
     marketData,
     portfolioData,
-    // agentsList,
-    // requestAgentsList,
-    // switchAgent,
+    agentsList,
+    requestAgentsList,
+    switchAgent,
+    registerAgent,
+    agentRegisterResult,
+    setAgentRegisterResult,
     autopilotState,
     autopilotReport,
     setAutopilot,
@@ -105,6 +110,10 @@ function App() {
     stopDaemon,
     funFact,
   } = useSidecar();
+
+  // /agent new — multi-step flow state
+  const [agentNewPhase, setAgentNewPhase] = useState<null | "description" | "agent-name" | "registering">(null);
+  const agentNewDataRef = useRef<{ description?: string; descSuggestions?: string[]; nameSuggestions?: string[] }>({});
 
   // Error dismissal
   const [dismissedError, setDismissedError] = useState<string | null>(null);
@@ -132,6 +141,43 @@ function App() {
     }
     prevAutoReport.current = autopilotReport;
   }, [autopilotReport, addLocalMessage]);
+
+  // Display agent list when it arrives from sidecar
+  const prevAgentsList = useRef(agentsList);
+  useEffect(() => {
+    if (agentsList.length > 0 && agentsList !== prevAgentsList.current) {
+      const lines = agentsList.map((a) => {
+        const marker = a.active ? " ← active" : "";
+        const stage = a.journeyStage ? ` · ${a.journeyStage}` : "";
+        return `  \`${a.name}\` — ${a.status}${stage}${marker}`;
+      });
+      addLocalMessage(
+        `**Agents**:\n\n${lines.join("\n")}\n\n\`/agent switch <name>\` · \`/agent new\``,
+        "info",
+      );
+    }
+    prevAgentsList.current = agentsList;
+  }, [agentsList, addLocalMessage]);
+
+  // Handle agent registration result from /agent new
+  useEffect(() => {
+    if (!agentRegisterResult) return;
+
+    if (agentRegisterResult.success) {
+      addLocalMessage(
+        `Agent **"${agentRegisterResult.agentName}"** registered!${agentRegisterResult.verificationCode ? `\n\nVerification code: \`${agentRegisterResult.verificationCode}\`` : ""}`,
+        "info",
+      );
+      setAgentNewPhase(null);
+    } else if (agentRegisterResult.nameConflict) {
+      addLocalMessage(`**"${agentRegisterResult.error}"**\n\nPick a different name.`, "error");
+      setAgentNewPhase("agent-name");
+    } else {
+      addLocalMessage(`Registration failed: ${agentRegisterResult.error}`, "error");
+      setAgentNewPhase(null);
+    }
+    setAgentRegisterResult(null);
+  }, [agentRegisterResult, addLocalMessage, setAgentRegisterResult]);
 
   // Listen for tray menu events
   useEffect(() => {
@@ -271,6 +317,55 @@ function App() {
       return;
     }
 
+    // Agent management
+    if (cmd === "/agent") {
+      const sub = parts[1]?.toLowerCase();
+
+      if (!sub || sub === "list") {
+        void requestAgentsList();
+        return;
+      }
+
+      if (sub === "switch") {
+        const targetName = parts[2]?.toLowerCase();
+        if (!targetName) {
+          addLocalMessage("Usage: `/agent switch <name>`\n\nType `/agent list` to see available agents.", "error");
+          return;
+        }
+        if (targetName === agentName) {
+          addLocalMessage(`**"${targetName}"** is already the active agent.`, "info");
+          return;
+        }
+        void switchAgent(targetName);
+        return;
+      }
+
+      if (sub === "new") {
+        // Pick 3 random descriptions for personality
+        const descSuggestions = [
+          "reckless degen trader",
+          "cautious moon watcher",
+          "vibes-based portfolio manager",
+          "calm under pressure",
+          "chaos-loving market surfer",
+          "data-driven strategist",
+        ].sort(() => Math.random() - 0.5).slice(0, 3);
+        agentNewDataRef.current = { descSuggestions };
+        addLocalMessage(
+          `**Pick a personality** — or type your own:\n\n  1) ${descSuggestions[0]}\n  2) ${descSuggestions[1]}\n  3) ${descSuggestions[2]}`,
+          "info",
+        );
+        setAgentNewPhase("description");
+        return;
+      }
+
+      addLocalMessage(
+        `Unknown subcommand: \`${sub}\`\n\n  \`/agent\`              — List agents\n  \`/agent switch <name>\` — Switch agent\n  \`/agent new\`           — Create new agent`,
+        "error",
+      );
+      return;
+    }
+
     // Model switch
     if (cmd === "/model") {
       void switchModel(args);
@@ -284,6 +379,71 @@ function App() {
     if (!input.trim() || status !== "ready") return;
     const text = input.trim();
     setInput("");
+
+    // Intercept input during /agent new flow
+    if (agentNewPhase) {
+      // Allow cancelling via any slash command
+      if (text.startsWith("/")) {
+        setAgentNewPhase(null);
+        agentNewDataRef.current = {};
+        handleSlashCommand(text);
+        return;
+      }
+
+      if (agentNewPhase === "description") {
+        addUserMessage(text);
+        const num = parseInt(text, 10);
+        const suggestions = agentNewDataRef.current.descSuggestions;
+        let description: string;
+        if (num >= 1 && num <= 3 && suggestions && suggestions[num - 1]) {
+          description = suggestions[num - 1];
+        } else {
+          description = text;
+        }
+        agentNewDataRef.current.description = description;
+        addLocalMessage(`Personality: **${description}**`, "info");
+
+        // Move to name phase
+        const nameSuggestions = [
+          "phantom-drift", "signal-hunter", "nova-rider", "deep-current",
+          "void-pulse", "neon-fox", "iron-tide", "solar-ghost",
+          "zero-echo", "dark-momentum", "quantum-wolf", "silent-orbit",
+        ].sort(() => Math.random() - 0.5).slice(0, 3);
+        agentNewDataRef.current.nameSuggestions = nameSuggestions;
+        addLocalMessage(
+          `**Choose a name** — or type your own (2-32 chars, lowercase, hyphens ok):\n\n  1) \`${nameSuggestions[0]}\`\n  2) \`${nameSuggestions[1]}\`\n  3) \`${nameSuggestions[2]}\``,
+          "info",
+        );
+        setAgentNewPhase("agent-name");
+        return;
+      }
+
+      if (agentNewPhase === "agent-name") {
+        addUserMessage(text);
+        const num = parseInt(text, 10);
+        const suggestions = agentNewDataRef.current.nameSuggestions;
+        let name: string;
+        if (num >= 1 && num <= 3 && suggestions && suggestions[num - 1]) {
+          name = suggestions[num - 1];
+        } else {
+          name = text.toLowerCase();
+        }
+
+        // Local validation
+        if (!/^[a-z0-9_-]{2,32}$/.test(name)) {
+          addLocalMessage("Invalid name. Must be 2-32 chars, lowercase letters, numbers, hyphens, or underscores.", "error");
+          return;
+        }
+
+        addLocalMessage(`Registering agent **"${name}"**...`, "info");
+        setAgentNewPhase("registering");
+        void registerAgent(name, agentNewDataRef.current.description ?? "autonomous agent");
+        return;
+      }
+
+      // "registering" phase — ignore input while API call is in progress
+      return;
+    }
 
     // Intercept input during model switch
     if (modelSwitchPhase === "need-key") {
@@ -340,7 +500,7 @@ function App() {
           /> */}
           {funFact && (
             <span className="text-xs text-muted-foreground truncate">
-              {stripMarkdown(funFact)}
+              <span className="inline-block animate-pulse">✦</span> {stripMarkdown(funFact)}
             </span>
           )}
         </div>
@@ -478,6 +638,7 @@ function App() {
           status={status}
           pluginName={plugin}
           agentName={agentName}
+          journeyStage={journeyStage}
         />
       )}
 
